@@ -1,7 +1,8 @@
 Source: qtdeclarative-opensource-src
 Section: libs
 Priority: optional
-Maintainer: Debian Qt/KDE Maintainers <debian-qt-kde@lists.debian.org>
+Maintainer: Adam Boardman <adamboardman@gmail.com>
+XSBC-Original-Maintainer: Debian Qt/KDE Maintainers <debian-qt-kde@lists.debian.org>
 Uploaders: Sune Vuorela <debian@pusling.com>,
            Pino Toscano <pino@debian.org>,
            Lisandro Damián Nicanor Pérez Meyer <lisandro@debian.org>,
@@ -9,16 +10,16 @@ Uploaders: Sune Vuorela <debian@pusling.com>,
            Dmitry Shachnev <mitya57@debian.org>
 Build-Depends: debhelper (>= 9.20160114~),
                dpkg-dev (>= 1.16.1),
-               libgl1-mesa-dri,
-               libqt5opengl5-dev (>= 5.7.1+dfsg~),
+               libgles2-mesa-dri,
+               libqt5opengl5-dev (>= 5.7.1+gemian),
                libqt5xmlpatterns5-dev (>= 5.7.1~20161021~),
                pkg-kde-tools (>= 0.15.17~),
                python,
-               qtbase5-private-dev (>= 5.7.1+dfsg~),
+               qtbase5-private-dev (>= 5.7.1+gemian),
                xauth,
                xvfb
-Build-Depends-Indep: libqt5sql5-sqlite (>= 5.7.1~20161021+dfsg~),
-                     qtbase5-doc-html (>= 5.7.1~20161021+dfsg~),
+Build-Depends-Indep: libqt5sql5-sqlite (>= 5.7.1~20161021+gemian),
+                     qtbase5-doc-html (>= 5.7.1~20161021+gemian),
                      qttools5-dev-tools (>= 5.7.1~20161021~)
 Standards-Version: 3.9.8
 Homepage: http://qt-project.org/
@@ -31,7 +32,7 @@ Architecture: any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}, ${shlibs:Depends}
-Recommends: libgl1-mesa-glx
+Recommends: libgles2-mesa-glx
 Suggests: qt5-qmltooling-plugins
 Description: Qt 5 QML module
  Qt is a cross-platform C++ application framework. Qt's primary feature
@@ -173,7 +174,7 @@ Package: qml-module-qtquick2
 Architecture: any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
-Depends: libgl1-mesa-dri, ${misc:Depends}, ${shlibs:Depends}
+Depends: libgles2-mesa-dri, ${misc:Depends}, ${shlibs:Depends}
 Description: Qt 5 Qt Quick 2 QML module
  Qt is a cross-platform C++ application framework. Qt's primary feature
  is its rich set of widgets that provide standard GUI functionality.
