@@ -1,3 +1,9 @@
+qtdeclarative-opensource-src (5.10.1+gemian) unstable; urgency=medium
+
+  * Building for Gemian
+
+ -- Adam Boardman <adamboardman@gmail.com>  Thu, 17 May 2018 14:06:03 +0000
+
 qtdeclarative-opensource-src (5.10.1-4) unstable; urgency=high
 
   * Avoid marking hidden windows as updatePending in Gui render loop
