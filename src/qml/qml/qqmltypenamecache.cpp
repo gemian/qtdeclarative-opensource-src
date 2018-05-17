@@ -43,7 +43,8 @@
 
 QT_BEGIN_NAMESPACE
 
-QQmlTypeNameCache::QQmlTypeNameCache()
+QQmlTypeNameCache::QQmlTypeNameCache(const QQmlImports &importCache)
+    : m_imports(importCache)
 {
 }
 
@@ -54,7 +55,7 @@ QQmlTypeNameCache::~QQmlTypeNameCache()
 void QQmlTypeNameCache::add(const QHashedString &name, const QUrl &url, const QHashedString &nameSpace)
 {
     if (nameSpace.length() != 0) {
-        Import *i = m_namedImports.value(nameSpace);
+        QQmlImportRef *i = m_namedImports.value(nameSpace);
         Q_ASSERT(i != 0);
         i->compositeSingletons.insert(name, url);
         return;
@@ -68,11 +69,12 @@ void QQmlTypeNameCache::add(const QHashedString &name, const QUrl &url, const QH
 
 void QQmlTypeNameCache::add(const QHashedString &name, int importedScriptIndex, const QHashedString &nameSpace)
 {
-    Import import;
+    QQmlImportRef import;
     import.scriptIndex = importedScriptIndex;
+    import.m_qualifier = name;
 
     if (nameSpace.length() != 0) {
-        Import *i = m_namedImports.value(nameSpace);
+        QQmlImportRef *i = m_namedImports.value(nameSpace);
         Q_ASSERT(i != 0);
         m_namespacedImports[i].insert(name, import);
         return;
@@ -84,7 +86,7 @@ void QQmlTypeNameCache::add(const QHashedString &name, int importedScriptIndex, 
     m_namedImports.insert(name, import);
 }
 
-QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QHashedStringRef &name)
+QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QHashedStringRef &name) const
 {
     Result result = query(m_namedImports, name);
 
@@ -93,26 +95,50 @@ QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QHashedStringRef &name)
 
     if (!result.isValid())
         result = query(m_anonymousCompositeSingletons, name);
+
+    if (!result.isValid()) {
+        // Look up anonymous types from the imports of this document
+        QQmlImportNamespace *typeNamespace = 0;
+        QList<QQmlError> errors;
+        QQmlType t;
+        bool typeFound = m_imports.resolveType(name, &t, 0, 0, &typeNamespace, &errors);
+        if (typeFound) {
+            return Result(t);
+        }
+
+    }
 
     return result;
 }
 
 QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QHashedStringRef &name,
-                                                                   const void *importNamespace)
+                                                   const QQmlImportRef *importNamespace) const
 {
-    Q_ASSERT(importNamespace);
-    const Import *i = static_cast<const Import *>(importNamespace);
-    Q_ASSERT(i->scriptIndex == -1);
+    Q_ASSERT(importNamespace && importNamespace->scriptIndex == -1);
 
-    Result result = typeSearch(i->modules, name);
+    Result result = typeSearch(importNamespace->modules, name);
 
     if (!result.isValid())
-        result = query(i->compositeSingletons, name);
+        result = query(importNamespace->compositeSingletons, name);
+
+    if (!result.isValid()) {
+        // Look up types from the imports of this document
+        // ### it would be nice if QQmlImports allowed us to resolve a namespace
+        // first, and then types on it.
+        QString qualifiedTypeName = importNamespace->m_qualifier + QLatin1Char('.') + name.toString();
+        QQmlImportNamespace *typeNamespace = 0;
+        QList<QQmlError> errors;
+        QQmlType t;
+        bool typeFound = m_imports.resolveType(qualifiedTypeName, &t, 0, 0, &typeNamespace, &errors);
+        if (typeFound) {
+            return Result(t);
+        }
+    }
 
     return result;
 }
 
-QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QV4::String *name)
+QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QV4::String *name, QQmlImport::RecursionRestriction recursionRestriction) const
 {
     Result result = query(m_namedImports, name);
 
@@ -122,26 +148,52 @@ QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QV4::String *name)
     if (!result.isValid())
         result = query(m_anonymousCompositeSingletons, name);
 
+    if (!result.isValid()) {
+        // Look up anonymous types from the imports of this document
+        QString typeName = name->toQStringNoThrow();
+        QQmlImportNamespace *typeNamespace = 0;
+        QList<QQmlError> errors;
+        QQmlType t;
+        bool typeFound = m_imports.resolveType(typeName, &t, 0, 0, &typeNamespace, &errors,
+                                               QQmlType::AnyRegistrationType, recursionRestriction);
+        if (typeFound) {
+            return Result(t);
+        }
+
+    }
+
     return result;
 }
 
-QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QV4::String *name, const void *importNamespace)
+QQmlTypeNameCache::Result QQmlTypeNameCache::query(const QV4::String *name, const QQmlImportRef *importNamespace) const
 {
-    Q_ASSERT(importNamespace);
-    const Import *i = static_cast<const Import *>(importNamespace);
-    Q_ASSERT(i->scriptIndex == -1);
+    Q_ASSERT(importNamespace && importNamespace->scriptIndex == -1);
 
-    QMap<const Import *, QStringHash<Import> >::const_iterator it = m_namespacedImports.constFind(i);
+    QMap<const QQmlImportRef *, QStringHash<QQmlImportRef> >::const_iterator it = m_namespacedImports.constFind(importNamespace);
     if (it != m_namespacedImports.constEnd()) {
         Result r = query(*it, name);
         if (r.isValid())
             return r;
     }
 
-    Result r = typeSearch(i->modules, name);
+    Result r = typeSearch(importNamespace->modules, name);
 
     if (!r.isValid())
-        r = query(i->compositeSingletons, name);
+        r = query(importNamespace->compositeSingletons, name);
+
+    if (!r.isValid()) {
+        // Look up types from the imports of this document
+        // ### it would be nice if QQmlImports allowed us to resolve a namespace
+        // first, and then types on it.
+        QString qualifiedTypeName = importNamespace->m_qualifier + QLatin1Char('.') + name->toQStringNoThrow();
+        QQmlImportNamespace *typeNamespace = 0;
+        QList<QQmlError> errors;
+        QQmlType t;
+        bool typeFound = m_imports.resolveType(qualifiedTypeName, &t, 0, 0, &typeNamespace, &errors);
+        if (typeFound) {
+            return Result(t);
+        }
+    }
 
     return r;
 }

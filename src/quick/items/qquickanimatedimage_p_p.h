@@ -51,14 +51,18 @@
 // We mean it.
 //
 
-#include "qquickimage_p_p.h"
+#include <QtQuick/qtquickglobal.h>
 
-#ifndef QT_NO_MOVIE
+QT_REQUIRE_CONFIG(quick_animatedimage);
+
+#include "qquickimage_p_p.h"
 
 QT_BEGIN_NAMESPACE
 
 class QMovie;
+#if QT_CONFIG(qml_network)
 class QNetworkReply;
+#endif
 
 class QQuickAnimatedImagePrivate : public QQuickImagePrivate
 {
@@ -66,25 +70,31 @@ class QQuickAnimatedImagePrivate : public QQuickImagePrivate
 
 public:
     QQuickAnimatedImagePrivate()
-      : playing(true), paused(false), preset_currentframe(0), _movie(0), reply(0), redirectCount(0), oldPlaying(false), currentSourceSize(0, 0)
+      : playing(true), paused(false), oldPlaying(false), padding(0)
+      , presetCurrentFrame(0) , currentSourceSize(0, 0), movie(nullptr)
+#if QT_CONFIG(qml_network)
+      , reply(nullptr), redirectCount(0)
+#endif
     {
     }
 
     QQuickPixmap *infoForCurrentFrame(QQmlEngine *engine);
+    void setMovie(QMovie *movie);
 
-    bool playing;
-    bool paused;
-    int preset_currentframe;
-    QMovie *_movie;
+    bool playing : 1;
+    bool paused : 1;
+    bool oldPlaying : 1;
+    unsigned padding: 29;
+    int presetCurrentFrame;
+    QSize currentSourceSize;
+    QMovie *movie;
+#if QT_CONFIG(qml_network)
     QNetworkReply *reply;
     int redirectCount;
-    bool oldPlaying;
+#endif
     QMap<int, QQuickPixmap *> frameMap;
-    QSize currentSourceSize;
 };
 
 QT_END_NAMESPACE
-
-#endif // QT_NO_MOVIE
 
 #endif // QQUICKANIMATEDIMAGE_P_P_H

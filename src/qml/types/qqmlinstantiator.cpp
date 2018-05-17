@@ -85,7 +85,7 @@ void QQmlInstantiatorPrivate::clear()
 QObject *QQmlInstantiatorPrivate::modelObject(int index, bool async)
 {
     requestedIndex = index;
-    QObject *o = instanceModel->object(index, async);
+    QObject *o = instanceModel->object(index, async ? QQmlIncubator::Asynchronous : QQmlIncubator::AsynchronousIfNested);
     requestedIndex = -1;
     return o;
 }
@@ -123,7 +123,7 @@ void QQmlInstantiatorPrivate::_q_createdItem(int idx, QObject* item)
     if (objects.contains(item)) //Case when it was created synchronously in regenerate
         return;
     if (requestedIndex != idx) // Asynchronous creation, reference the object
-        (void)instanceModel->object(idx, false);
+        (void)instanceModel->object(idx);
     item->setParent(q);
     if (objects.size() < idx + 1) {
         int modelCount = instanceModel->count();
@@ -155,7 +155,8 @@ void QQmlInstantiatorPrivate::_q_modelUpdated(const QQmlChangeSet &changeSet, bo
 
     int difference = 0;
     QHash<int, QVector<QPointer<QObject> > > moved;
-    foreach (const QQmlChangeSet::Change &remove, changeSet.removes()) {
+    const QVector<QQmlChangeSet::Change> &removes = changeSet.removes();
+    for (const QQmlChangeSet::Change &remove : removes) {
         int index = qMin(remove.index, objects.count());
         int count = qMin(remove.index + remove.count, objects.count()) - index;
         if (remove.isMove()) {
@@ -174,7 +175,8 @@ void QQmlInstantiatorPrivate::_q_modelUpdated(const QQmlChangeSet &changeSet, bo
         difference -= remove.count;
     }
 
-    foreach (const QQmlChangeSet::Change &insert, changeSet.inserts()) {
+    const QVector<QQmlChangeSet::Change> &inserts = changeSet.inserts();
+    for (const QQmlChangeSet::Change &insert : inserts) {
         int index = qMin(insert.index, objects.count());
         if (insert.isMove()) {
             QVector<QPointer<QObject> > movedObjects = moved.value(insert.moveId);

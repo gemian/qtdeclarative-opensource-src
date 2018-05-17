@@ -44,7 +44,6 @@
 #include <private/qsgadaptationlayer_p.h>
 
 #include <QtGui/qpixmapcache.h>
-#include <QtCore/qstringbuilder.h>
 #include <QtCore/qmath.h>
 #include <QtCore/qmetaobject.h>
 
@@ -73,7 +72,7 @@ QT_BEGIN_NAMESPACE
 QQuickPen::QQuickPen(QObject *parent)
     : QObject(parent)
     , m_width(1)
-    , m_color("#000000")
+    , m_color(Qt::black)
     , m_aligned(true)
     , m_valid(false)
 {
@@ -91,6 +90,7 @@ void QQuickPen::setWidth(qreal w)
 
     m_width = w;
     m_valid = m_color.alpha() && (qRound(m_width) >= 1 || (!m_aligned && m_width > 0));
+    static_cast<QQuickItem*>(parent())->update();
     emit penChanged();
 }
 
@@ -103,6 +103,7 @@ void QQuickPen::setColor(const QColor &c)
 {
     m_color = c;
     m_valid = m_color.alpha() && (qRound(m_width) >= 1 || (!m_aligned && m_width > 0));
+    static_cast<QQuickItem*>(parent())->update();
     emit penChanged();
 }
 
@@ -117,6 +118,7 @@ void QQuickPen::setPixelAligned(bool aligned)
         return;
     m_aligned = aligned;
     m_valid = m_color.alpha() && (qRound(m_width) >= 1 || (!m_aligned && m_width > 0));
+    static_cast<QQuickItem*>(parent())->update();
     emit penChanged();
 }
 
@@ -323,6 +325,9 @@ QQuickRectangle::QQuickRectangle(QQuickItem *parent)
 : QQuickItem(*(new QQuickRectanglePrivate), parent)
 {
     setFlag(ItemHasContents);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    setAcceptTouchEvents(false);
+#endif
 }
 
 void QQuickRectangle::doUpdate()
@@ -357,7 +362,11 @@ void QQuickRectangle::doUpdate()
 QQuickPen *QQuickRectangle::border()
 {
     Q_D(QQuickRectangle);
-    return d->getPen();
+    if (!d->pen) {
+        d->pen = new QQuickPen;
+        QQml_setParent_noEvent(d->pen, this);
+    }
+    return d->pen;
 }
 
 /*!
@@ -483,8 +492,8 @@ QSGNode *QQuickRectangle::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData 
         return 0;
     }
 
-    QSGRectangleNode *rectangle = static_cast<QSGRectangleNode *>(oldNode);
-    if (!rectangle) rectangle = d->sceneGraphContext()->createRectangleNode();
+    QSGInternalRectangleNode *rectangle = static_cast<QSGInternalRectangleNode *>(oldNode);
+    if (!rectangle) rectangle = d->sceneGraphContext()->createInternalRectangleNode();
 
     rectangle->setRect(QRectF(0, 0, width(), height()));
     rectangle->setColor(d->color);
@@ -512,3 +521,5 @@ QSGNode *QQuickRectangle::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData 
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickrectangle_p.cpp"

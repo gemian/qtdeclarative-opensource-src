@@ -147,11 +147,14 @@ private slots:
 
     void padding();
 
-    void zeroWidthAndElidedDoesntRender();
+    void hintingPreference();
 
+    void zeroWidthAndElidedDoesntRender();
 
     void hAlignWidthDependsOnImplicitWidth_data();
     void hAlignWidthDependsOnImplicitWidth();
+
+    void fontInfo();
 
 private:
     QStringList standard;
@@ -333,7 +336,7 @@ void tst_qquicktext::width()
             metricWidth = layout.boundingRect().width();
         } else {
             QFontMetricsF fm(f);
-            metricWidth = fm.size(Qt::TextExpandTabs && Qt::TextShowMnemonic, standard.at(i)).width();
+            metricWidth = fm.size(Qt::TextExpandTabs | Qt::TextShowMnemonic, standard.at(i)).width();
         }
 
         QString componentStr = "import QtQuick 2.0\nText { text: \"" + standard.at(i) + "\" }";
@@ -720,6 +723,61 @@ void tst_qquicktext::textFormat()
         QCOMPARE(text->textFormat(), QQuickText::AutoText);
         QCOMPARE(spy.count(), 2);
     }
+
+    {
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick 2.0\n Text { text: \"<b>Hello</b>\" }", QUrl());
+        QScopedPointer<QObject> object(component.create());
+        QQuickText *text = qobject_cast<QQuickText *>(object.data());
+        QVERIFY(text);
+        QQuickTextPrivate *textPrivate = QQuickTextPrivate::get(text);
+        QVERIFY(textPrivate);
+
+        QCOMPARE(text->textFormat(), QQuickText::AutoText);
+        QVERIFY(!textPrivate->layout.formats().isEmpty());
+
+        text->setTextFormat(QQuickText::StyledText);
+        QVERIFY(!textPrivate->layout.formats().isEmpty());
+
+        text->setTextFormat(QQuickText::PlainText);
+        QVERIFY(textPrivate->layout.formats().isEmpty());
+
+        text->setTextFormat(QQuickText::AutoText);
+        QVERIFY(!textPrivate->layout.formats().isEmpty());
+    }
+
+    {
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick 2.0\nText { text: \"Hello\"; elide: Text.ElideRight }", QUrl::fromLocalFile(""));
+        QScopedPointer<QObject> object(component.create());
+        QQuickText *text = qobject_cast<QQuickText *>(object.data());
+        QVERIFY(text);
+        QQuickTextPrivate *textPrivate = QQuickTextPrivate::get(text);
+        QVERIFY(textPrivate);
+
+        // underline a mnemonic
+        QVector<QTextLayout::FormatRange> formats;
+        QTextLayout::FormatRange range;
+        range.start = 0;
+        range.length = 1;
+        range.format.setFontUnderline(true);
+        formats << range;
+
+        // the mnemonic format should be retained
+        textPrivate->layout.setFormats(formats);
+        text->forceLayout();
+        QCOMPARE(textPrivate->layout.formats(), formats);
+
+        // and carried over to the elide layout
+        text->setWidth(text->implicitWidth() - 1);
+        QVERIFY(textPrivate->elideLayout);
+        QCOMPARE(textPrivate->elideLayout->formats(), formats);
+
+        // but cleared when the text changes
+        text->setText("Changed");
+        QVERIFY(textPrivate->elideLayout);
+        QVERIFY(textPrivate->layout.formats().isEmpty());
+    }
 }
 
 //the alignment tests may be trivial o.oa
@@ -761,11 +819,6 @@ void tst_qquicktext::horizontalAlignment()
 
 void tst_qquicktext::horizontalAlignment_RightToLeft()
 {
-#if defined(Q_OS_BLACKBERRY)
-    QQuickWindow dummy;      // On BlackBerry first window is always full screen,
-    dummy.showFullScreen();  // so make test window a second window.
-#endif
-
     QScopedPointer<QQuickView> window(createView(testFile("horizontalAlignment_RightToLeft.qml")));
     QQuickText *text = window->rootObject()->findChild<QQuickText*>("text");
     QVERIFY(text != 0);
@@ -4165,6 +4218,33 @@ void tst_qquicktext::padding()
     delete root;
 }
 
+void tst_qquicktext::hintingPreference()
+{
+    {
+        QString componentStr = "import QtQuick 2.0\nText { text: \"Hello world!\" }";
+        QQmlComponent textComponent(&engine);
+        textComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile(""));
+        QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
+
+        QVERIFY(textObject != 0);
+        QCOMPARE((int)textObject->font().hintingPreference(), (int)QFont::PreferDefaultHinting);
+
+        delete textObject;
+    }
+    {
+        QString componentStr = "import QtQuick 2.0\nText { text: \"Hello world!\"; font.hintingPreference: Font.PreferNoHinting }";
+        QQmlComponent textComponent(&engine);
+        textComponent.setData(componentStr.toLatin1(), QUrl::fromLocalFile(""));
+        QQuickText *textObject = qobject_cast<QQuickText*>(textComponent.create());
+
+        QVERIFY(textObject != 0);
+        QCOMPARE((int)textObject->font().hintingPreference(), (int)QFont::PreferNoHinting);
+
+        delete textObject;
+    }
+}
+
+
 void tst_qquicktext::zeroWidthAndElidedDoesntRender()
 {
     // Tests QTBUG-34990
@@ -4228,6 +4308,23 @@ void tst_qquicktext::hAlignWidthDependsOnImplicitWidth()
     QVERIFY(rect->setProperty("text", "this is mis-aligned"));
     image = window->grabWindow();
     QCOMPARE(numberOfNonWhitePixels(0, rectX - 1, image), 0);
+}
+
+void tst_qquicktext::fontInfo()
+{
+    QQmlComponent component(&engine, testFile("fontInfo.qml"));
+
+    QScopedPointer<QObject> object(component.create());
+    QObject *root = object.data();
+
+    QQuickText *main = root->findChild<QQuickText *>("main");
+    QVERIFY(main);
+    QCOMPARE(main->font().pixelSize(), 1000);
+
+    QQuickText *copy = root->findChild<QQuickText *>("copy");
+    QVERIFY(copy);
+    QCOMPARE(copy->font().family(), QFontInfo(QFont()).family());
+    QVERIFY(copy->font().pixelSize() < 1000);
 }
 
 QTEST_MAIN(tst_qquicktext)

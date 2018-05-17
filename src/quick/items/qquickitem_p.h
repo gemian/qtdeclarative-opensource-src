@@ -56,6 +56,7 @@
 #include "qquickanchors_p.h"
 #include "qquickanchors_p_p.h"
 #include "qquickitemchangelistener_p.h"
+#include "qquickevents_p_p.h"
 
 #include "qquickwindow_p.h"
 
@@ -75,8 +76,9 @@
 #include <QtCore/qdebug.h>
 #include <QtCore/qelapsedtimer.h>
 
+#if QT_CONFIG(quick_shadereffect)
 #include <QtQuick/private/qquickshadereffectsource_p.h>
-#include <QtQuick/private/qquickshadereffect_p.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -85,6 +87,7 @@ class QQuickItemKeyFilter;
 class QQuickLayoutMirroringAttached;
 class QQuickEnterKeyAttached;
 class QQuickScreenAttached;
+class QQuickPointerHandler;
 
 class QQuickContents : public QQuickItemChangeListener
 {
@@ -92,13 +95,13 @@ public:
     QQuickContents(QQuickItem *item);
     ~QQuickContents();
 
-    QRectF rectF() const { return QRectF(m_x, m_y, m_width, m_height); }
+    QRectF rectF() const { return m_contents; }
 
     inline void calcGeometry(QQuickItem *changed = 0);
     void complete();
 
 protected:
-    void itemGeometryChanged(QQuickItem *item, const QRectF &newGeometry, const QRectF &oldGeometry) Q_DECL_OVERRIDE;
+    void itemGeometryChanged(QQuickItem *item, QQuickGeometryChange change, const QRectF &) Q_DECL_OVERRIDE;
     void itemDestroyed(QQuickItem *item) Q_DECL_OVERRIDE;
     void itemChildAdded(QQuickItem *, QQuickItem *) Q_DECL_OVERRIDE;
     void itemChildRemoved(QQuickItem *, QQuickItem *) Q_DECL_OVERRIDE;
@@ -110,10 +113,7 @@ private:
     void updateRect();
 
     QQuickItem *m_item;
-    qreal m_x;
-    qreal m_y;
-    qreal m_width;
-    qreal m_height;
+    QRectF m_contents;
 };
 
 void QQuickContents::calcGeometry(QQuickItem *changed)
@@ -135,6 +135,7 @@ public:
     QList<QQuickItem *> items;
 };
 
+#if QT_CONFIG(quick_shadereffect)
 
 class QQuickItemLayer : public QObject, public QQuickItemChangeListener
 {
@@ -149,6 +150,8 @@ class QQuickItemLayer : public QObject, public QQuickItemChangeListener
     Q_PROPERTY(QByteArray samplerName READ name WRITE setName NOTIFY nameChanged)
     Q_PROPERTY(QQmlComponent *effect READ effect WRITE setEffect NOTIFY effectChanged)
     Q_PROPERTY(QQuickShaderEffectSource::TextureMirroring textureMirroring READ textureMirroring WRITE setTextureMirroring NOTIFY textureMirroringChanged)
+    Q_PROPERTY(int samples READ samples WRITE setSamples NOTIFY samplesChanged)
+
 public:
     QQuickItemLayer(QQuickItem *item);
     ~QQuickItemLayer();
@@ -186,9 +189,12 @@ public:
     QQuickShaderEffectSource::TextureMirroring textureMirroring() const { return m_textureMirroring; }
     void setTextureMirroring(QQuickShaderEffectSource::TextureMirroring mirroring);
 
+    int samples() const { return m_samples; }
+    void setSamples(int count);
+
     QQuickShaderEffectSource *effectSource() const { return m_effectSource; }
 
-    void itemGeometryChanged(QQuickItem *, const QRectF &, const QRectF &) Q_DECL_OVERRIDE;
+    void itemGeometryChanged(QQuickItem *, QQuickGeometryChange, const QRectF &) Q_DECL_OVERRIDE;
     void itemOpacityChanged(QQuickItem *) Q_DECL_OVERRIDE;
     void itemParentChanged(QQuickItem *, QQuickItem *) Q_DECL_OVERRIDE;
     void itemSiblingOrderChanged(QQuickItem *) Q_DECL_OVERRIDE;
@@ -210,6 +216,7 @@ Q_SIGNALS:
     void formatChanged(QQuickShaderEffectSource::Format format);
     void sourceRectChanged(const QRectF &sourceRect);
     void textureMirroringChanged(QQuickShaderEffectSource::TextureMirroring mirroring);
+    void samplesChanged(int count);
 
 private:
     friend class QQuickTransformAnimatorJob;
@@ -234,7 +241,10 @@ private:
     QQuickItem *m_effect;
     QQuickShaderEffectSource *m_effectSource;
     QQuickShaderEffectSource::TextureMirroring m_textureMirroring;
+    int m_samples;
 };
+
+#endif
 
 class Q_QUICK_PRIVATE_EXPORT QQuickItemPrivate : public QObjectPrivate
 {
@@ -243,8 +253,6 @@ class Q_QUICK_PRIVATE_EXPORT QQuickItemPrivate : public QObjectPrivate
 public:
     static QQuickItemPrivate* get(QQuickItem *item) { return item->d_func(); }
     static const QQuickItemPrivate* get(const QQuickItem *item) { return item->d_func(); }
-
-    static void registerAccessorProperties();
 
     QQuickItemPrivate();
     ~QQuickItemPrivate();
@@ -270,6 +278,8 @@ public:
     QQuickAnchorLine baseline() const;
 
     QQuickItemLayer *layer() const;
+
+    bool hasPointerHandlers() const;
 
     // data property
     static void data_append(QQmlListProperty<QObject> *, QObject *);
@@ -301,7 +311,6 @@ public:
     static void transform_clear(QQmlListProperty<QQuickTransform> *list);
 
     void _q_resourceObjectDeleted(QObject *);
-    void _q_windowChanged(QQuickWindow *w);
     quint64 _q_createJSWrapper(QV4::ExecutionEngine *engine);
 
     enum ChangeType {
@@ -314,29 +323,18 @@ public:
         Children = 0x40,
         Rotation = 0x80,
         ImplicitWidth = 0x100,
-        ImplicitHeight = 0x200
+        ImplicitHeight = 0x200,
+        Enabled = 0x400,
     };
 
     Q_DECLARE_FLAGS(ChangeTypes, ChangeType)
 
-    enum GeometryChangeType {
-        NoChange = 0,
-        XChange = 0x01,
-        YChange = 0x02,
-        WidthChange = 0x04,
-        HeightChange = 0x08,
-        SizeChange = WidthChange | HeightChange,
-        GeometryChange = XChange | YChange | SizeChange
-    };
-
-    Q_DECLARE_FLAGS(GeometryChangeTypes, GeometryChangeType)
-
     struct ChangeListener {
-        ChangeListener(QQuickItemChangeListener *l = Q_NULLPTR, QQuickItemPrivate::ChangeTypes t = 0) : listener(l), types(t), gTypes(GeometryChange) {}
-        ChangeListener(QQuickItemChangeListener *l, QQuickItemPrivate::GeometryChangeTypes gt) : listener(l), types(Geometry), gTypes(gt) {}
+        ChangeListener(QQuickItemChangeListener *l = nullptr, QQuickItemPrivate::ChangeTypes t = 0) : listener(l), types(t), gTypes(QQuickGeometryChange::All) {}
+        ChangeListener(QQuickItemChangeListener *l, QQuickGeometryChange gt) : listener(l), types(Geometry), gTypes(gt) {}
         QQuickItemChangeListener *listener;
         QQuickItemPrivate::ChangeTypes types;
-        QQuickItemPrivate::GeometryChangeTypes gTypes;  //NOTE: not used for ==
+        QQuickGeometryChange gTypes;  //NOTE: not used for ==
         bool operator==(const ChangeListener &other) const { return listener == other.listener && types == other.types; }
     };
 
@@ -353,14 +351,20 @@ public:
         QQuickLayoutMirroringAttached* layoutDirectionAttached;
         QQuickEnterKeyAttached *enterKeyAttached;
         QQuickItemKeyFilter *keyHandler;
+        QVector<QQuickPointerHandler *> pointerHandlers;
+#if QT_CONFIG(quick_shadereffect)
         mutable QQuickItemLayer *layer;
-#ifndef QT_NO_CURSOR
+#endif
+#if QT_CONFIG(cursor)
         QCursor cursor;
 #endif
         QPointF userTransformOriginPoint;
 
+        // these do not include child items
         int effectRefCount;
         int hideRefCount;
+        // updated recursively for child items as well
+        int recursiveEffectRefCount;
 
         QSGOpacityNode *opacityNode;
         QQuickDefaultClipNode *clipNode;
@@ -390,8 +394,8 @@ public:
 
     void addItemChangeListener(QQuickItemChangeListener *listener, ChangeTypes types);
     void removeItemChangeListener(QQuickItemChangeListener *, ChangeTypes types);
-    void updateOrAddGeometryChangeListener(QQuickItemChangeListener *listener, GeometryChangeTypes types);
-    void updateOrRemoveGeometryChangeListener(QQuickItemChangeListener *listener, GeometryChangeTypes types);
+    void updateOrAddGeometryChangeListener(QQuickItemChangeListener *listener, QQuickGeometryChange types);
+    void updateOrRemoveGeometryChangeListener(QQuickItemChangeListener *listener, QQuickGeometryChange types);
 
     QQuickStateGroup *_states();
     QQuickStateGroup *_stateGroup;
@@ -427,8 +431,9 @@ public:
     bool isAccessible:1;
     bool culled:1;
     bool hasCursor:1;
-    bool hasCursorInChild:1;
+    bool subtreeCursorEnabled:1;
     // Bit 32
+    bool subtreeHoverEnabled:1;
     bool activeFocusOnTab:1;
     bool implicitAntialiasing:1;
     bool antialiasingValid:1;
@@ -439,6 +444,7 @@ public:
     // focus chain and prevents tabbing outside.
     bool isTabFence:1;
     bool replayingPressEvent:1;
+    bool touchEnabled:1;
 
     enum DirtyType {
         TransformOrigin         = 0x00000001,
@@ -488,7 +494,6 @@ public:
     inline QSGRenderContext *sceneGraphRenderContext() const;
 
     QQuickItem *parentItem;
-    QQmlNotifier parentNotifier;
 
     QList<QQuickItem *> childItems;
     mutable QList<QQuickItem *> *sortedChildItems;
@@ -541,7 +546,7 @@ public:
     virtual void implicitWidthChanged();
     virtual void implicitHeightChanged();
 
-#ifndef QT_NO_ACCESSIBILITY
+#if QT_CONFIG(accessibility)
     virtual QAccessible::Role accessibleRole() const;
 #endif
 
@@ -563,9 +568,15 @@ public:
     virtual void transformChanged();
 
     void deliverKeyEvent(QKeyEvent *);
-#ifndef QT_NO_IM
+    bool filterKeyEvent(QKeyEvent *, bool post);
+#if QT_CONFIG(im)
     void deliverInputMethodEvent(QInputMethodEvent *);
 #endif
+    void deliverShortcutOverrideEvent(QKeyEvent *);
+
+    virtual bool handlePointerEvent(QQuickPointerEvent *, bool avoidExclusiveGrabber = false);
+
+    virtual void setVisible(bool visible);
 
     bool isTransparentForPositioner() const;
     void setTransparentForPositioner(bool trans);
@@ -599,6 +610,7 @@ public:
     // A reference from an effect item means that this item is used by the effect, so
     // it should insert a root node.
     void refFromEffectItem(bool hide);
+    void recursiveRefFromEffectItem(int refs);
     void derefFromEffectItem(bool unhide);
 
     void itemChange(QQuickItem::ItemChange, const QQuickItem::ItemChangeData &);
@@ -606,6 +618,9 @@ public:
     virtual void mirrorChange() {}
 
     void setHasCursorInChild(bool hasCursor);
+    void setHasHoverInChild(bool hasHover);
+
+    virtual void updatePolish() { }
 };
 
 /*
@@ -622,10 +637,11 @@ public:
 
     virtual void keyPressed(QKeyEvent *event, bool post);
     virtual void keyReleased(QKeyEvent *event, bool post);
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     virtual void inputMethodEvent(QInputMethodEvent *event, bool post);
     virtual QVariant inputMethodQuery(Qt::InputMethodQuery query) const;
 #endif
+    virtual void shortcutOverride(QKeyEvent *event);
     virtual void componentComplete();
 
     bool m_processPost;
@@ -773,6 +789,7 @@ public:
     QQuickItem *imeItem;
     QList<QQuickItem *> targets;
     QQuickItem *item;
+    QQuickKeyEvent theKeyEvent;
 };
 
 class QQuickKeysAttached : public QObject, public QQuickItemKeyFilter
@@ -816,6 +833,7 @@ Q_SIGNALS:
     void priorityChanged();
     void pressed(QQuickKeyEvent *event);
     void released(QQuickKeyEvent *event);
+    void shortcutOverride(QQuickKeyEvent *event);
     void digit0Pressed(QQuickKeyEvent *event);
     void digit1Pressed(QQuickKeyEvent *event);
     void digit2Pressed(QQuickKeyEvent *event);
@@ -860,13 +878,14 @@ Q_SIGNALS:
 private:
     void keyPressed(QKeyEvent *event, bool post) Q_DECL_OVERRIDE;
     void keyReleased(QKeyEvent *event, bool post) Q_DECL_OVERRIDE;
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     void inputMethodEvent(QInputMethodEvent *, bool post) Q_DECL_OVERRIDE;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const Q_DECL_OVERRIDE;
 #endif
-    const QByteArray keyToSignal(int key);
+    void shortcutOverride(QKeyEvent *event) override;
+    static QByteArray keyToSignal(int key);
 
-    bool isConnected(const char *signalName);
+    bool isConnected(const char *signalName) const;
 };
 
 Qt::MouseButtons QQuickItemPrivate::acceptedMouseButtons() const
@@ -933,7 +952,9 @@ Q_DECLARE_TYPEINFO(QQuickItemPrivate::ChangeListener, Q_PRIMITIVE_TYPE);
 
 QT_END_NAMESPACE
 
+#if QT_CONFIG(quick_shadereffect)
 QML_DECLARE_TYPE(QQuickItemLayer)
+#endif
 QML_DECLARE_TYPE(QQuickKeysAttached)
 QML_DECLARE_TYPEINFO(QQuickKeysAttached, QML_HAS_ATTACHED_PROPERTIES)
 QML_DECLARE_TYPE(QQuickKeyNavigationAttached)

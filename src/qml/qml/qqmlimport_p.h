@@ -68,6 +68,57 @@ class QQmlImportNamespace;
 class QQmlImportsPrivate;
 class QQmlImportDatabase;
 class QQmlTypeLoader;
+class QQmlTypeLoaderQmldirContent;
+
+namespace QQmlImport {
+    enum RecursionRestriction { PreventRecursion, AllowRecursion };
+}
+
+struct QQmlImportInstance
+{
+    QString uri; // e.g. QtQuick
+    QString url; // the base path of the import
+    int majversion; // the major version imported
+    int minversion; // the minor version imported
+    bool isLibrary; // true means that this is not a file import
+    bool implicitlyImported = false;
+    QQmlDirComponents qmlDirComponents; // a copy of the components listed in the qmldir
+    QQmlDirScripts qmlDirScripts; // a copy of the scripts in the qmldir
+
+    bool setQmldirContent(const QString &resolvedUrl, const QQmlTypeLoaderQmldirContent *qmldir,
+                          QQmlImportNamespace *nameSpace, QList<QQmlError> *errors);
+
+    static QQmlDirScripts getVersionedScripts(const QQmlDirScripts &qmldirscripts, int vmaj, int vmin);
+
+    bool resolveType(QQmlTypeLoader *typeLoader, const QHashedStringRef &type,
+                     int *vmajor, int *vminor, QQmlType* type_return,
+                     QString *base = 0, bool *typeRecursionDetected = 0,
+                     QQmlType::RegistrationType = QQmlType::AnyRegistrationType,
+                     QQmlImport::RecursionRestriction recursionRestriction = QQmlImport::PreventRecursion) const;
+};
+
+class QQmlImportNamespace
+{
+public:
+    QQmlImportNamespace() : nextNamespace(0) {}
+    ~QQmlImportNamespace() { qDeleteAll(imports); }
+
+    QList<QQmlImportInstance *> imports;
+
+    QQmlImportInstance *findImport(const QString &uri) const;
+
+    bool resolveType(QQmlTypeLoader *typeLoader, const QHashedStringRef& type,
+                     int *vmajor, int *vminor, QQmlType* type_return,
+                     QString *base = 0, QList<QQmlError> *errors = 0,
+                     QQmlType::RegistrationType registrationType = QQmlType::AnyRegistrationType,
+                     QQmlImport::RecursionRestriction recursionRestriction = QQmlImport::PreventRecursion);
+
+    // Prefix when used as a qualified import.  Otherwise empty.
+    QHashedString prefix;
+
+    // Used by QQmlImportsPrivate::qualifiedSets
+    QQmlImportNamespace *nextNamespace;
+};
 
 class Q_QML_PRIVATE_EXPORT QQmlImports
 {
@@ -83,13 +134,18 @@ public:
     QUrl baseUrl() const;
 
     bool resolveType(const QHashedStringRef &type,
-                     QQmlType** type_return,
+                     QQmlType *type_return,
                      int *version_major, int *version_minor,
-                     QQmlImportNamespace** ns_return,
-                     QList<QQmlError> *errors = 0) const;
-    bool resolveType(QQmlImportNamespace*,
+                     QQmlImportNamespace **ns_return,
+                     QList<QQmlError> *errors = 0,
+                     QQmlType::RegistrationType registrationType = QQmlType::AnyRegistrationType,
+                     QQmlImport::RecursionRestriction recursionRestriction
+                     = QQmlImport::PreventRecursion) const;
+    bool resolveType(QQmlImportNamespace *,
                      const QHashedStringRef& type,
-                     QQmlType** type_return, int *version_major, int *version_minor) const;
+                     QQmlType *type_return, int *version_major, int *version_minor,
+                     QQmlType::RegistrationType registrationType
+                     = QQmlType::AnyRegistrationType) const;
 
     bool addImplicitImport(QQmlImportDatabase *importDb, QList<QQmlError> *errors);
 
@@ -135,6 +191,7 @@ public:
 
     static bool isLocal(const QString &url);
     static bool isLocal(const QUrl &url);
+    static QUrl urlFromLocalFileOrQrcOrUrl(const QString &);
 
     static void setDesignerSupportRequired(bool b);
 

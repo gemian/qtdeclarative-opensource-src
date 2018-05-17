@@ -54,7 +54,6 @@
 #include <QtCore/qglobal.h>
 #include <QtQml/qqmlerror.h>
 #include <private/qqmlengine_p.h>
-#include <private/qpointervaluepair_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -101,11 +100,10 @@ public:
     QQmlJavaScriptExpression();
     virtual ~QQmlJavaScriptExpression();
 
-    virtual QString expressionIdentifier() = 0;
+    virtual QString expressionIdentifier() const = 0;
     virtual void expressionChanged() = 0;
 
-    QV4::ReturnedValue evaluate(bool *isUndefined);
-    QV4::ReturnedValue evaluate(QV4::CallData *callData, bool *isUndefined);
+    void evaluate(QV4::CallData *callData, bool *isUndefined, QV4::Scope &scope);
 
     inline bool notifyOnValueChanged() const;
 
@@ -115,10 +113,15 @@ public:
     inline QObject *scopeObject() const;
     inline void setScopeObject(QObject *v);
 
+    QQmlSourceLocation sourceLocation() const;
+    void setSourceLocation(const QQmlSourceLocation &location);
+
     bool isValid() const { return context() != 0; }
 
     QQmlContextData *context() const { return m_context; }
     void setContext(QQmlContextData *context);
+
+    QV4::Function *function() const;
 
     virtual void refresh();
 
@@ -138,7 +141,8 @@ public:
     inline bool hasDelayedError() const;
     QQmlError error(QQmlEngine *) const;
     void clearError();
-    void clearGuards();
+    void clearActiveGuards();
+    void clearPermanentGuards();
     QQmlDelayedError *delayedError();
 
     static QV4::ReturnedValue evalFunction(QQmlContextData *ctxt, QObject *scope,
@@ -147,25 +151,41 @@ public:
 protected:
     void createQmlBinding(QQmlContextData *ctxt, QObject *scope, const QString &code, const QString &filename, quint16 line);
 
-private:
-    friend class QQmlContextData;
-    friend class QQmlPropertyCapture;
-    friend void QQmlJavaScriptExpressionGuard_callback(QQmlNotifierEndpoint *, void **);
+    void cancelPermanentGuards() const
+    {
+        if (m_permanentDependenciesRegistered) {
+            for (QQmlJavaScriptExpressionGuard *it = permanentGuards.first(); it; it = permanentGuards.next(it))
+                it->cancelNotify();
+        }
+    }
 
-    QQmlDelayedError *m_error;
+    void setupFunction(QV4::ExecutionContext *qmlContext, QV4::Function *f);
+    void setCompilationUnit(QV4::CompiledData::CompilationUnit *compilationUnit);
 
     // We store some flag bits in the following flag pointers.
     //    activeGuards:flag1  - notifyOnValueChanged
     //    activeGuards:flag2  - useSharedContext
     QBiPointer<QObject, DeleteWatcher> m_scopeObject;
     QForwardFieldList<QQmlJavaScriptExpressionGuard, &QQmlJavaScriptExpressionGuard::next> activeGuards;
+    QForwardFieldList<QQmlJavaScriptExpressionGuard, &QQmlJavaScriptExpressionGuard::next> permanentGuards;
+
+private:
+    friend class QQmlContextData;
+    friend class QQmlPropertyCapture;
+    friend void QQmlJavaScriptExpressionGuard_callback(QQmlNotifierEndpoint *, void **);
+    friend class QQmlTranslationBinding;
+
+    QQmlDelayedError *m_error;
 
     QQmlContextData *m_context;
     QQmlJavaScriptExpression **m_prevExpression;
     QQmlJavaScriptExpression  *m_nextExpression;
+    bool m_permanentDependenciesRegistered = false;
 
-protected:
-    QV4::PersistentValue m_function;
+    QV4::PersistentValue m_qmlScope;
+    QQmlRefPointer<QV4::CompiledData::CompilationUnit> m_compilationUnit;
+    QV4::Function *m_v4Function;
+    QQmlSourceLocation *m_sourceLocation; // used for Qt.binding() created functions
 };
 
 class QQmlPropertyCapture
@@ -179,10 +199,14 @@ public:
         Q_ASSERT(errorString == 0);
     }
 
-    void captureProperty(QQmlNotifier *);
-    void captureProperty(QObject *, int, int);
+    enum Duration {
+        OnlyOnce,
+        Permanently
+    };
 
-    static void registerQmlDependencies(QV4::ExecutionEngine *engine, const QV4::CompiledData::Function *compiledFunction);
+    static void registerQmlDependencies(const QV4::CompiledData::Function *compiledFunction, const QV4::Scope &scope);
+    void captureProperty(QQmlNotifier *, Duration duration = OnlyOnce);
+    void captureProperty(QObject *, int, int, Duration duration = OnlyOnce, bool doNotify = true);
 
     QQmlEngine *engine;
     QQmlJavaScriptExpression *expression;

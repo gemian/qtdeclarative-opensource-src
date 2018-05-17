@@ -76,20 +76,23 @@ struct RegExpCacheKey;
 namespace Heap {
 
 struct RegExp : Base {
-    RegExp(ExecutionEngine* engine, const QString& pattern, bool ignoreCase, bool multiline);
-    ~RegExp();
-    QString pattern;
-    OwnPtr<JSC::Yarr::BytecodePattern> byteCode;
+    void init(ExecutionEngine* engine, const QString& pattern, bool ignoreCase, bool multiline, bool global);
+    void destroy();
+
+    QString *pattern;
+    JSC::Yarr::BytecodePattern *byteCode;
 #if ENABLE(YARR_JIT)
-    JSC::Yarr::YarrCodeBlock jitCode;
+    JSC::Yarr::YarrCodeBlock *jitCode;
 #endif
     RegExpCache *cache;
     int subPatternCount;
     bool ignoreCase;
     bool multiLine;
+    bool global;
 
     int captureCount() const { return subPatternCount + 1; }
 };
+V4_ASSERT_IS_TRIVIAL(RegExp)
 
 }
 
@@ -98,53 +101,56 @@ struct RegExp : public Managed
     V4_MANAGED(RegExp, Managed)
     Q_MANAGED_TYPE(RegExp)
     V4_NEEDS_DESTROY
+    V4_INTERNALCLASS(RegExp)
 
-    QString pattern() const { return d()->pattern; }
-    OwnPtr<JSC::Yarr::BytecodePattern> &byteCode() { return d()->byteCode; }
+    QString pattern() const { return *d()->pattern; }
+    JSC::Yarr::BytecodePattern *byteCode() { return d()->byteCode; }
 #if ENABLE(YARR_JIT)
-    JSC::Yarr::YarrCodeBlock jitCode() const { return d()->jitCode; }
+    JSC::Yarr::YarrCodeBlock *jitCode() const { return d()->jitCode; }
 #endif
     RegExpCache *cache() const { return d()->cache; }
     int subPatternCount() const { return d()->subPatternCount; }
     bool ignoreCase() const { return d()->ignoreCase; }
     bool multiLine() const { return d()->multiLine; }
+    bool global() const { return d()->global; }
 
-    static Heap::RegExp *create(ExecutionEngine* engine, const QString& pattern, bool ignoreCase = false, bool multiline = false);
+    static Heap::RegExp *create(ExecutionEngine* engine, const QString& pattern, bool ignoreCase = false, bool multiline = false, bool global = false);
 
-    bool isValid() const { return d()->byteCode.get(); }
+    bool isValid() const { return d()->byteCode; }
 
     uint match(const QString& string, int start, uint *matchOffsets);
 
     int captureCount() const { return subPatternCount() + 1; }
-
-    static void markObjects(Heap::Base *that, QV4::ExecutionEngine *e);
 
     friend class RegExpCache;
 };
 
 struct RegExpCacheKey
 {
-    RegExpCacheKey(const QString &pattern, bool ignoreCase, bool multiLine)
+    RegExpCacheKey(const QString &pattern, bool ignoreCase, bool multiLine, bool global)
         : pattern(pattern)
         , ignoreCase(ignoreCase)
         , multiLine(multiLine)
+        , global(global)
     { }
     explicit inline RegExpCacheKey(const RegExp::Data *re);
 
     bool operator==(const RegExpCacheKey &other) const
-    { return pattern == other.pattern && ignoreCase == other.ignoreCase && multiLine == other.multiLine; }
+    { return pattern == other.pattern && ignoreCase == other.ignoreCase && multiLine == other.multiLine && global == other.global; }
     bool operator!=(const RegExpCacheKey &other) const
     { return !operator==(other); }
 
     QString pattern;
     uint ignoreCase : 1;
     uint multiLine : 1;
+    uint global : 1;
 };
 
 inline RegExpCacheKey::RegExpCacheKey(const RegExp::Data *re)
-    : pattern(re->pattern)
+    : pattern(*re->pattern)
     , ignoreCase(re->ignoreCase)
     , multiLine(re->multiLine)
+    , global(re->global)
 {}
 
 inline uint qHash(const RegExpCacheKey& key, uint seed = 0) Q_DECL_NOTHROW

@@ -72,7 +72,7 @@ public:
         int ref;
     };
 
-    QQmlObjectModelPrivate() : QObjectPrivate() {}
+    QQmlObjectModelPrivate() : QObjectPrivate(), moveId(0) {}
 
     static void children_append(QQmlListProperty<QObject> *prop, QObject *item) {
         int index = static_cast<QQmlObjectModelPrivate *>(prop->data)->children.count();
@@ -129,7 +129,7 @@ public:
         }
 
         QQmlChangeSet changeSet;
-        changeSet.move(from, to, n, -1);
+        changeSet.move(from, to, n, ++moveId);
         emit q->modelUpdated(changeSet, false);
         emit q->childrenChanged();
     }
@@ -154,7 +154,7 @@ public:
 
     void clear() {
         Q_Q(QQmlObjectModel);
-        foreach (const Item &child, children)
+        for (const Item &child : qAsConst(children))
             emit q->destroyingItem(child.item);
         remove(0, children.count());
     }
@@ -166,7 +166,7 @@ public:
         return -1;
     }
 
-
+    uint moveId;
     QList<Item> children;
 };
 
@@ -178,8 +178,8 @@ public:
     \ingroup qtquick-models
     \brief Defines a set of items to be used as a model
 
-    A ObjectModel contains the visual items to be used in a view.
-    When a ObjectModel is used in a view, the view does not require
+    An ObjectModel contains the visual items to be used in a view.
+    When an ObjectModel is used in a view, the view does not require
     a delegate since the ObjectModel already contains the visual
     delegate (items).
 
@@ -267,7 +267,7 @@ bool QQmlObjectModel::isValid() const
     return true;
 }
 
-QObject *QQmlObjectModel::object(int index, bool)
+QObject *QQmlObjectModel::object(int index, QQmlIncubator::IncubationMode)
 {
     Q_D(QQmlObjectModel);
     QQmlObjectModelPrivate::Item &item = d->children[index];
@@ -296,6 +296,11 @@ QString QQmlObjectModel::stringValue(int index, const QString &name)
     if (index < 0 || index >= d->children.count())
         return QString();
     return QQmlEngine::contextForObject(d->children.at(index).item)->contextProperty(name).toString();
+}
+
+QQmlIncubator::Status QQmlObjectModel::incubationStatus(int)
+{
+    return QQmlIncubator::Ready;
 }
 
 int QQmlObjectModel::indexOf(QObject *item, QObject *) const
@@ -373,7 +378,7 @@ void QQmlObjectModel::insert(int index, QObject *object)
 {
     Q_D(QQmlObjectModel);
     if (index < 0 || index > count()) {
-        qmlInfo(this) << tr("insert: index %1 out of range").arg(index);
+        qmlWarning(this) << tr("insert: index %1 out of range").arg(index);
         return;
     }
     d->insert(index, object);
@@ -400,7 +405,7 @@ void QQmlObjectModel::move(int from, int to, int n)
     if (n <= 0 || from == to)
         return;
     if (from < 0 || to < 0 || from + n > count() || to + n > count()) {
-        qmlInfo(this) << tr("move: out of range");
+        qmlWarning(this) << tr("move: out of range");
         return;
     }
     d->move(from, to, n);
@@ -418,7 +423,7 @@ void QQmlObjectModel::remove(int index, int n)
 {
     Q_D(QQmlObjectModel);
     if (index < 0 || n <= 0 || index + n > count()) {
-        qmlInfo(this) << tr("remove: indices [%1 - %2] out of range [0 - %3]").arg(index).arg(index+n).arg(count());
+        qmlWarning(this) << tr("remove: indices [%1 - %2] out of range [0 - %3]").arg(index).arg(index+n).arg(count());
         return;
     }
     d->remove(index, n);
@@ -439,3 +444,5 @@ void QQmlObjectModel::clear()
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qqmlobjectmodel_p.cpp"

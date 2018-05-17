@@ -42,19 +42,14 @@
 
 QT_BEGIN_NAMESPACE
 
-void QQuickImplicitSizeItemPrivate::implicitWidthChanged()
-{
-    Q_Q(QQuickImplicitSizeItem);
-    QQuickItemPrivate::implicitWidthChanged();
-    emit q->implicitWidthChanged2();
-}
+/*!
+    \internal
 
-void QQuickImplicitSizeItemPrivate::implicitHeightChanged()
-{
-    Q_Q(QQuickImplicitSizeItem);
-    QQuickItemPrivate::implicitHeightChanged();
-    emit q->implicitHeightChanged2();
-}
+    QQuickImplicitSizeItem redefines the implicitWidth and implicitHeight
+    properties as readonly, as some items (e.g. Image, where the implicit size
+    represents the real size of the image) should not be able to have their
+    implicit size modified.
+*/
 
 QQuickImplicitSizeItem::QQuickImplicitSizeItem(QQuickImplicitSizeItemPrivate &dd, QQuickItem *parent)
     : QQuickItem(dd, parent)
@@ -62,3 +57,5 @@ QQuickImplicitSizeItem::QQuickImplicitSizeItem(QQuickImplicitSizeItemPrivate &dd
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickimplicitsizeitem_p.cpp"

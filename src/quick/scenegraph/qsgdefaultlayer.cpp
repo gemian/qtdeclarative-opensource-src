@@ -40,8 +40,13 @@
 
 #include <private/qqmlglobal_p.h>
 #include <private/qsgrenderer_p.h>
+#include <private/qsgdefaultrendercontext_p.h>
 
-#include <QOpenGLFramebufferObject>
+#include <QtGui/QOpenGLFramebufferObject>
+#include <QtGui/QOpenGLFunctions>
+#include <QtGui/private/qopenglextensions_p.h>
+
+#include <QtQuick/private/qsgdepthstencilbuffer_p.h>
 
 #ifdef QSG_DEBUG_FBO_OVERLAY
 DEFINE_BOOL_CONFIG_OPTION(qmlFboOverlay, QML_FBO_OVERLAY)
@@ -95,7 +100,7 @@ QSGDefaultLayer::QSGDefaultLayer(QSGRenderContext *context)
 #ifdef QSG_DEBUG_FBO_OVERLAY
     , m_debugOverlay(0)
 #endif
-    , m_context(context)
+    , m_samples(0)
     , m_mipmap(false)
     , m_live(true)
     , m_recursive(false)
@@ -106,6 +111,7 @@ QSGDefaultLayer::QSGDefaultLayer(QSGRenderContext *context)
     , m_mirrorHorizontal(false)
     , m_mirrorVertical(true)
 {
+    m_context = static_cast<QSGDefaultRenderContext *>(context);
 }
 
 QSGDefaultLayer::~QSGDefaultLayer()
@@ -309,16 +315,25 @@ void QSGDefaultLayer::grab()
 
     QOpenGLFunctions *funcs = QOpenGLContext::currentContext()->functions();
     bool deleteFboLater = false;
-    if (!m_fbo || m_fbo->size() != m_size || m_fbo->format().internalTextureFormat() != m_format
-        || (!m_fbo->format().mipmap() && m_mipmap))
-    {
+
+    int effectiveSamples = m_samples;
+    // By default m_samples is 0. Fall back to the context's setting in this case.
+    if (effectiveSamples == 0)
+        effectiveSamples = m_context->openglContext()->format().samples();
+
+    const bool needsNewFbo = !m_fbo || m_fbo->size() != m_size || m_fbo->format().internalTextureFormat() != m_format;
+    const bool mipmapGotEnabled = m_fbo && !m_fbo->format().mipmap() && m_mipmap;
+    const bool msaaGotEnabled = effectiveSamples > 1 && (!m_secondaryFbo || m_secondaryFbo->format().samples() != effectiveSamples);
+    const bool msaaGotDisabled = effectiveSamples <= 1 && m_secondaryFbo;
+
+    if (needsNewFbo || mipmapGotEnabled || msaaGotEnabled || msaaGotDisabled) {
         if (!m_multisamplingChecked) {
-            if (m_context->openglContext()->format().samples() <= 1) {
+            if (effectiveSamples <= 1) {
                 m_multisampling = false;
             } else {
-                const QSet<QByteArray> extensions = m_context->openglContext()->extensions();
-                m_multisampling = extensions.contains(QByteArrayLiteral("GL_EXT_framebuffer_multisample"))
-                    && extensions.contains(QByteArrayLiteral("GL_EXT_framebuffer_blit"));
+                QOpenGLExtensions *e = static_cast<QOpenGLExtensions *>(funcs);
+                m_multisampling = e->hasOpenGLExtension(QOpenGLExtensions::FramebufferMultisample)
+                    && e->hasOpenGLExtension(QOpenGLExtensions::FramebufferBlit);
             }
             m_multisamplingChecked = true;
         }
@@ -329,7 +344,7 @@ void QSGDefaultLayer::grab()
             QOpenGLFramebufferObjectFormat format;
 
             format.setInternalTextureFormat(m_format);
-            format.setSamples(m_context->openglContext()->format().samples());
+            format.setSamples(effectiveSamples);
             m_secondaryFbo = new QOpenGLFramebufferObject(m_size, format);
             m_depthStencilBuffer = m_context->depthStencilBufferForFbo(m_secondaryFbo);
         } else {
@@ -457,3 +472,5 @@ QRectF QSGDefaultLayer::normalizedTextureSubRect() const
                   m_mirrorHorizontal ? -1 : 1,
                   m_mirrorVertical ? 1 : -1);
 }
+
+#include "moc_qsgdefaultlayer_p.cpp"

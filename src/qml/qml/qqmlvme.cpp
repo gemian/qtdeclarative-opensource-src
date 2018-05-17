@@ -39,7 +39,6 @@
 
 #include "qqmlvme_p.h"
 
-#include "qqmlcompiler_p.h"
 #include "qqmlboundsignal_p.h"
 #include "qqmlstringconverters_p.h"
 #include <private/qmetaobjectbuilder_p.h>
@@ -63,7 +62,6 @@
 #include "qqmlpropertyvalueinterceptor_p.h"
 #include "qqmlvaluetypeproxybinding_p.h"
 #include "qqmlexpression_p.h"
-#include "qqmlcontextwrapper_p.h"
 
 #include <QStack>
 #include <QPointF>

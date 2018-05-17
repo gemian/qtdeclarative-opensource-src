@@ -45,7 +45,6 @@
 #include <QtQuick/private/qsgrenderer_p.h>
 #include <qsgsimplerectnode.h>
 
-#include "qopenglframebufferobject.h"
 #include "qmath.h"
 #include <QtQuick/private/qsgtexture_p.h>
 #include <QtCore/QRunnable>
@@ -65,7 +64,7 @@ public:
     {
     }
 
-    QSGTexture *texture() const {
+    QSGTexture *texture() const override {
         sourceTexture->setMipmapFiltering(mipmapFiltering);
         sourceTexture->setFiltering(filtering);
         sourceTexture->setHorizontalWrapMode(horizontalWrap);
@@ -190,6 +189,7 @@ QQuickShaderEffectSource::QQuickShaderEffectSource(QQuickItem *parent)
     , m_sourceItem(0)
     , m_textureSize(0, 0)
     , m_format(RGBA)
+    , m_samples(0)
     , m_live(true)
     , m_hideSource(false)
     , m_mipmap(false)
@@ -309,11 +309,11 @@ QQuickItem *QQuickShaderEffectSource::sourceItem() const
     return m_sourceItem;
 }
 
-void QQuickShaderEffectSource::itemGeometryChanged(QQuickItem *item, const QRectF &newRect, const QRectF &oldRect)
+void QQuickShaderEffectSource::itemGeometryChanged(QQuickItem *item, QQuickGeometryChange change, const QRectF &)
 {
     Q_ASSERT(item == m_sourceItem);
     Q_UNUSED(item);
-    if (newRect.size() != oldRect.size())
+    if (change.sizeChange())
         update();
 }
 
@@ -583,6 +583,44 @@ void QQuickShaderEffectSource::setTextureMirroring(TextureMirroring mirroring)
 }
 
 /*!
+    \qmlproperty int QtQuick::ShaderEffectSource::samples
+    \since 5.10
+
+    This property allows requesting multisampled rendering.
+
+    By default multisampling is enabled whenever multisampling is enabled for
+    the entire window, assuming the scenegraph renderer in use and the
+    underlying graphics API supports this.
+
+    By setting the value to 2, 4, etc. multisampled rendering can be requested
+    for a part of the scene without enabling multisampling for the entire
+    scene. This way multisampling is applied only to a given subtree, which can
+    lead to significant performance gains since multisampling is not applied to
+    other parts of the scene.
+
+    \note Enabling multisampling can be potentially expensive regardless of the
+    layer's size, as it incurs a hardware and driver dependent performance and
+    memory cost.
+
+    \note This property is only functional when support for multisample
+    renderbuffers and framebuffer blits is available. Otherwise the value is
+    silently ignored.
+ */
+int QQuickShaderEffectSource::samples() const
+{
+    return m_samples;
+}
+
+void QQuickShaderEffectSource::setSamples(int count)
+{
+    if (count == m_samples)
+        return;
+    m_samples = count;
+    update();
+    emit samplesChanged();
+}
+
+/*!
     \qmlmethod QtQuick::ShaderEffectSource::scheduleUpdate()
 
     Schedules a re-rendering of the texture for the next frame.
@@ -680,10 +718,11 @@ QSGNode *QQuickShaderEffectSource::updatePaintNode(QSGNode *oldNode, UpdatePaint
     m_texture->setDevicePixelRatio(d->window->effectiveDevicePixelRatio());
     m_texture->setSize(textureSize);
     m_texture->setRecursive(m_recursive);
-    m_texture->setFormat(GLenum(m_format));
+    m_texture->setFormat(m_format);
     m_texture->setHasMipmaps(m_mipmap);
     m_texture->setMirrorHorizontal(m_textureMirroring & MirrorHorizontally);
     m_texture->setMirrorVertical(m_textureMirroring & MirrorVertically);
+    m_texture->setSamples(m_samples);
 
     if (m_grab)
         m_texture->scheduleUpdate();
@@ -709,9 +748,9 @@ QSGNode *QQuickShaderEffectSource::updatePaintNode(QSGNode *oldNode, UpdatePaint
         return 0;
     }
 
-    QSGImageNode *node = static_cast<QSGImageNode *>(oldNode);
+    QSGInternalImageNode *node = static_cast<QSGInternalImageNode *>(oldNode);
     if (!node) {
-        node = d->sceneGraphContext()->createImageNode();
+        node = d->sceneGraphContext()->createInternalImageNode();
         node->setFlag(QSGNode::UsePreprocess);
         node->setTexture(m_texture);
         QQuickShaderSourceAttachedNode *attached = new QQuickShaderSourceAttachedNode;
@@ -757,5 +796,6 @@ void QQuickShaderEffectSource::itemChange(ItemChange change, const ItemChangeDat
 }
 
 #include "qquickshadereffectsource.moc"
+#include "moc_qquickshadereffectsource_p.cpp"
 
 QT_END_NAMESPACE

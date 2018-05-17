@@ -29,6 +29,7 @@
 #if ENABLE(ASSEMBLER) && (CPU(X86) || CPU(X86_64))
 
 #include "AssemblerBuffer.h"
+#include "AbstractMacroAssembler.h"
 #include "JITCompilationEffort.h"
 #include <stdint.h>
 #include <wtf/Assertions.h>
@@ -251,6 +252,47 @@ public:
         , m_indexOfTailOfLastWatchpoint(INT_MIN)
     {
     }
+
+#if defined(V4_BOOTSTRAP)
+    template <typename LabelType>
+    class Jump {
+        template<class TemplateAssemblerType>
+        friend class AbstractMacroAssembler;
+        friend class Call;
+        template <typename, template <typename> class> friend class LinkBufferBase;
+    public:
+        Jump()
+        {
+        }
+
+        Jump(AssemblerLabel jmp)
+            : m_label(jmp)
+        {
+        }
+
+        LabelType label() const
+        {
+            LabelType result;
+            result.m_label = m_label;
+            return result;
+        }
+
+        void link(AbstractMacroAssembler<X86Assembler>* masm) const
+        {
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label());
+        }
+
+        void linkTo(LabelType label, AbstractMacroAssembler<X86Assembler>* masm) const
+        {
+            masm->m_assembler.linkJump(m_label, label.label());
+        }
+
+        bool isSet() const { return m_label.isSet(); }
+
+    private:
+        AssemblerLabel m_label;
+    };
+#endif
 
     // Stack operations:
 
@@ -683,6 +725,21 @@ public:
         }
     }
 
+    void sarq_CLr(RegisterID dst)
+    {
+        m_formatter.oneByteOp64(OP_GROUP2_EvCL, GROUP2_OP_SAR, dst);
+    }
+
+    void sarq_i8r(int imm, RegisterID dst)
+    {
+        if (imm == 1)
+            m_formatter.oneByteOp64(OP_GROUP2_Ev1, GROUP2_OP_SAR, dst);
+        else {
+            m_formatter.oneByteOp64(OP_GROUP2_EvIb, GROUP2_OP_SAR, dst);
+            m_formatter.immediate8(imm);
+        }
+    }
+
     void shrq_i8r(int imm, RegisterID dst)
     {
         // ### doesn't work when removing the "0 &&"
@@ -692,6 +749,11 @@ public:
             m_formatter.oneByteOp64(OP_GROUP2_EvIb, GROUP2_OP_SHR, dst);
             m_formatter.immediate8(imm);
         }
+    }
+
+    void shrq_CLr(RegisterID dst)
+    {
+        m_formatter.oneByteOp64(OP_GROUP2_EvCL, GROUP2_OP_SHR, dst);
     }
 
     void shlq_i8r(int imm, RegisterID dst)
@@ -705,7 +767,10 @@ public:
         }
     }
 
-
+    void shlq_CLr(RegisterID dst)
+    {
+        m_formatter.oneByteOp64(OP_GROUP2_EvCL, GROUP2_OP_SHL, dst);
+    }
 #endif
 
     void sarl_i8r(int imm, RegisterID dst)
@@ -752,23 +817,6 @@ public:
     {
         m_formatter.oneByteOp(OP_GROUP2_EvCL, GROUP2_OP_SHL, dst);
     }
-
-#if CPU(X86_64)
-    void sarq_CLr(RegisterID dst)
-    {
-        m_formatter.oneByteOp64(OP_GROUP2_EvCL, GROUP2_OP_SAR, dst);
-    }
-
-    void sarq_i8r(int imm, RegisterID dst)
-    {
-        if (imm == 1)
-            m_formatter.oneByteOp64(OP_GROUP2_Ev1, GROUP2_OP_SAR, dst);
-        else {
-            m_formatter.oneByteOp64(OP_GROUP2_EvIb, GROUP2_OP_SAR, dst);
-            m_formatter.immediate8(imm);
-        }
-    }
-#endif
 
     void imull_rr(RegisterID src, RegisterID dst)
     {

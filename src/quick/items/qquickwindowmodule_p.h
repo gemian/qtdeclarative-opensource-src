@@ -54,10 +54,10 @@
 #include <private/qtquickglobal_p.h>
 #include <qquickwindow.h>
 #include <qqmlparserstatus.h>
+#include <private/qquickwindowattached_p.h>
 
 QT_BEGIN_NAMESPACE
 
-class QQuickWindowAttached;
 class QQuickWindowQmlImplPrivate;
 
 class Q_QUICK_PRIVATE_EXPORT QQuickWindowQmlImpl : public QQuickWindow, public QQmlParserStatus
@@ -67,6 +67,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickWindowQmlImpl : public QQuickWindow, public Q
 
     Q_PROPERTY(bool visible READ isVisible WRITE setVisible NOTIFY visibleChanged)
     Q_PROPERTY(Visibility visibility READ visibility WRITE setVisibility NOTIFY visibilityChanged)
+    Q_PROPERTY(QObject *screen READ screen WRITE setScreen NOTIFY screenChanged REVISION 2)
 
 public:
     QQuickWindowQmlImpl(QWindow *parent = Q_NULLPTR);
@@ -74,11 +75,15 @@ public:
     void setVisible(bool visible);
     void setVisibility(Visibility visibility);
 
+    QObject *screen() const;
+    void setScreen(QObject *screen);
+
     static QQuickWindowAttached *qmlAttachedProperties(QObject *object);
 
 Q_SIGNALS:
     void visibleChanged(bool arg);
     void visibilityChanged(QWindow::Visibility visibility);
+    Q_REVISION(2) void screenChanged();
 
 protected:
     void classBegin() Q_DECL_OVERRIDE;
@@ -99,5 +104,8 @@ public:
 };
 
 QT_END_NAMESPACE
+
+QML_DECLARE_TYPE(QQuickWindowQmlImpl)
+QML_DECLARE_TYPEINFO(QQuickWindowQmlImpl, QML_HAS_ATTACHED_PROPERTIES)
 
 #endif

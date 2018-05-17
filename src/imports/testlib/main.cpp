@@ -91,14 +91,14 @@ public Q_SLOTS:
     {
         QString name(v.typeName());
         if (v.canConvert<QObject*>()) {
-            QQmlType *type = 0;
+            QQmlType type;
             const QMetaObject *mo = v.value<QObject*>()->metaObject();
-            while (!type && mo) {
+            while (!type.isValid() && mo) {
                 type = QQmlMetaType::qmlType(mo);
                 mo = mo->superClass();
             }
-            if (type) {
-                name = type->qmlTypeName();
+            if (type.isValid()) {
+                name = type.qmlTypeName();
             }
         }
 
@@ -151,17 +151,15 @@ class QTestQmlModule : public QQmlExtensionPlugin
 
 public:
     QTestQmlModule(QObject *parent = 0) : QQmlExtensionPlugin(parent) { initResources(); }
-    virtual void registerTypes(const char *uri)
+    void registerTypes(const char *uri) Q_DECL_OVERRIDE
     {
         Q_ASSERT(QLatin1String(uri) == QLatin1String("QtTest"));
         qmlRegisterType<QuickTestResult, 0>(uri,1,0,"TestResult");
         qmlRegisterType<QuickTestResult, 1>(uri,1,1,"TestResult");
         qmlRegisterType<QuickTestEvent>(uri,1,0,"TestEvent");
+        qmlRegisterType<QuickTestEvent>(uri,1,2,"TestEvent");
         qmlRegisterType<QuickTestUtil>(uri,1,0,"TestUtil");
-    }
-
-    void initializeEngine(QQmlEngine *, const char *)
-    {
+        qmlRegisterType<QQuickTouchEventSequence>();
     }
 };
 

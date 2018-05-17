@@ -72,7 +72,15 @@ struct TypedArrayOperations {
 
 namespace Heap {
 
-struct TypedArray : Object {
+#define TypedArrayMembers(class, Member) \
+    Member(class, Pointer, ArrayBuffer *, buffer) \
+    Member(class, NoMark, const TypedArrayOperations *, type) \
+    Member(class, NoMark, uint, byteLength) \
+    Member(class, NoMark, uint, byteOffset) \
+    Member(class, NoMark, uint, arrayType)
+
+DECLARE_HEAP_OBJECT(TypedArray, Object) {
+    DECLARE_MARK_TABLE(TypedArray);
     enum Type {
         Int8Array,
         UInt8Array,
@@ -86,23 +94,17 @@ struct TypedArray : Object {
         NTypes
     };
 
-    TypedArray(Type t);
-
-    const TypedArrayOperations *type;
-    Pointer<ArrayBuffer> buffer;
-    uint byteLength;
-    uint byteOffset;
-    Type arrayType;
+    void init(Type t);
 };
 
 struct TypedArrayCtor : FunctionObject {
-    TypedArrayCtor(QV4::ExecutionContext *scope, TypedArray::Type t);
+    void init(QV4::ExecutionContext *scope, TypedArray::Type t);
 
     TypedArray::Type type;
 };
 
 struct TypedArrayPrototype : Object {
-    inline TypedArrayPrototype(TypedArray::Type t);
+    inline void init(TypedArray::Type t);
     TypedArray::Type type;
 };
 
@@ -128,42 +130,43 @@ struct Q_QML_PRIVATE_EXPORT TypedArray : Object
     }
 
     Heap::TypedArray::Type arrayType() const {
-        return d()->arrayType;
+        return static_cast<Heap::TypedArray::Type>(d()->arrayType);
     }
 
-    static void markObjects(Heap::Base *that, ExecutionEngine *e);
     static ReturnedValue getIndexed(const Managed *m, uint index, bool *hasProperty);
-    static void putIndexed(Managed *m, uint index, const Value &value);
+    static bool putIndexed(Managed *m, uint index, const Value &value);
 };
 
 struct TypedArrayCtor: FunctionObject
 {
     V4_OBJECT2(TypedArrayCtor, FunctionObject)
 
-    static ReturnedValue construct(const Managed *m, CallData *callData);
-    static ReturnedValue call(const Managed *that, CallData *callData);
+    static void construct(const Managed *m, Scope &scope, CallData *callData);
+    static void call(const Managed *that, Scope &scope, CallData *callData);
 };
 
 
 struct TypedArrayPrototype : Object
 {
     V4_OBJECT2(TypedArrayPrototype, Object)
+    V4_PROTOTYPE(objectPrototype)
 
     void init(ExecutionEngine *engine, TypedArrayCtor *ctor);
 
-    static ReturnedValue method_get_buffer(CallContext *ctx);
-    static ReturnedValue method_get_byteLength(CallContext *ctx);
-    static ReturnedValue method_get_byteOffset(CallContext *ctx);
-    static ReturnedValue method_get_length(CallContext *ctx);
+    static void method_get_buffer(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_get_byteLength(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_get_byteOffset(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_get_length(const BuiltinFunction *, Scope &scope, CallData *callData);
 
-    static ReturnedValue method_set(CallContext *ctx);
-    static ReturnedValue method_subarray(CallContext *ctx);
+    static void method_set(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_subarray(const BuiltinFunction *, Scope &scope, CallData *callData);
 };
 
-inline
-Heap::TypedArrayPrototype::TypedArrayPrototype(TypedArray::Type t)
-    : type(t)
+inline void
+Heap::TypedArrayPrototype::init(TypedArray::Type t)
 {
+    Object::init();
+    type = t;
 }
 
 } // namespace QV4

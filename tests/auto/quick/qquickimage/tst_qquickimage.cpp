@@ -91,6 +91,8 @@ private slots:
     void sourceSizeChanges();
     void correctStatus();
     void highdpi();
+    void highDpiFillModesAndSizes_data();
+    void highDpiFillModesAndSizes();
     void hugeImages();
 
 private:
@@ -145,9 +147,9 @@ void tst_qquickimage::imageSource_data()
     QTest::newRow("remote") << "/colors.png" << 120.0 << 120.0 << true << false << true << "";
     QTest::newRow("remote redirected") << "/oldcolors.png" << 120.0 << 120.0 << true << false << false << "";
     if (QImageReader::supportedImageFormats().contains("svg"))
-        QTest::newRow("remote svg") << "/heart.svg" << 550.0 << 500.0 << true << false << false << "";
+        QTest::newRow("remote svg") << "/heart.svg" << 595.0 << 841.0 << true << false << false << "";
     if (QImageReader::supportedImageFormats().contains("svgz"))
-        QTest::newRow("remote svgz") << "/heart.svgz" << 550.0 << 500.0 << true << false << false << "";
+        QTest::newRow("remote svgz") << "/heart.svgz" << 595.0 << 841.0 << true << false << false << "";
     QTest::newRow("remote not found") << "/no-such-file.png" << 0.0 << 0.0 << true
         << false << true << "<Unknown File>:2:1: QML Image: Error transferring {{ServerBaseUrl}}/no-such-file.png - server replied: Not found";
 
@@ -306,12 +308,9 @@ void tst_qquickimage::mirror()
 
     qreal width = 300;
     qreal height = 250;
+    qreal devicePixelRatio = 1.0;
 
     foreach (QQuickImage::FillMode fillMode, fillModes) {
-#if defined(Q_OS_BLACKBERRY)
-        QWindow dummy;          // On BlackBerry first window is always full screen,
-        dummy.showFullScreen(); // so make test window a second window.
-#endif
         QScopedPointer<QQuickView> window(new QQuickView);
         window->setSource(testFileUrl("mirror.qml"));
 
@@ -325,13 +324,15 @@ void tst_qquickimage::mirror()
 
         QImage screenshot = window->grabWindow();
         screenshots[fillMode] = screenshot;
+        devicePixelRatio = window->devicePixelRatio();
     }
 
     foreach (QQuickImage::FillMode fillMode, fillModes) {
         QPixmap srcPixmap;
         QVERIFY(srcPixmap.load(testFile("pattern.png")));
 
-        QPixmap expected(width, height);
+        QPixmap expected(width * (int)devicePixelRatio, height * (int)devicePixelRatio);
+        expected.setDevicePixelRatio(devicePixelRatio);
         expected.fill();
         QPainter p_e(&expected);
         QTransform transform;
@@ -374,7 +375,7 @@ void tst_qquickimage::mirror()
         }
 
         QImage img = expected.toImage();
-        QCOMPARE(screenshots[fillMode], img);
+        QCOMPARE(screenshots[fillMode].convertToFormat(img.format()), img);
     }
 }
 
@@ -400,11 +401,11 @@ void tst_qquickimage::svg()
     QQuickImage *obj = qobject_cast<QQuickImage*>(component.create());
     QVERIFY(obj != 0);
     QCOMPARE(obj->width(), 300.0);
-    QCOMPARE(obj->height(), 273.0);
+    QCOMPARE(obj->height(), 300.0);
     obj->setSourceSize(QSize(200,200));
 
     QCOMPARE(obj->width(), 200.0);
-    QCOMPARE(obj->height(), 182.0);
+    QCOMPARE(obj->height(), 200.0);
     delete obj;
 }
 
@@ -970,6 +971,65 @@ void tst_qquickimage::highdpi()
     QCOMPARE(obj->paintedHeight(), 300.0);
 
     delete obj;
+}
+
+void tst_qquickimage::highDpiFillModesAndSizes_data()
+{
+    QTest::addColumn<QQuickImage::FillMode>("fillMode");
+    QTest::addColumn<qreal>("expectedHeightAfterSettingWidthTo100");
+    QTest::addColumn<qreal>("expectedImplicitHeightAfterSettingWidthTo100");
+    QTest::addColumn<qreal>("expectedPaintedWidthAfterSettingWidthTo100");
+    QTest::addColumn<qreal>("expectedPaintedHeightAfterSettingWidthTo100");
+
+    QTest::addRow("Stretch") << QQuickImage::Stretch << 150.0 << 150.0 << 100.0 << 150.0;
+    QTest::addRow("PreserveAspectFit") << QQuickImage::PreserveAspectFit << 100.0 << 100.0 << 100.0 << 100.0;
+    QTest::addRow("PreserveAspectCrop") << QQuickImage::PreserveAspectCrop << 150.0 << 150.0 << 150.0 << 150.0;
+    QTest::addRow("Tile") << QQuickImage::Tile << 150.0 << 150.0 << 100.0 << 150.0;
+    QTest::addRow("TileVertically") << QQuickImage::TileVertically << 150.0 << 150.0 << 100.0 << 150.0;
+    QTest::addRow("TileHorizontally") << QQuickImage::TileHorizontally << 150.0 << 150.0 << 100.0 << 150.0;
+    QTest::addRow("Pad") << QQuickImage::Pad << 150.0 << 150.0 << 150.0 << 150.0;
+}
+
+void tst_qquickimage::highDpiFillModesAndSizes()
+{
+    QFETCH(QQuickImage::FillMode, fillMode);
+    QFETCH(qreal, expectedHeightAfterSettingWidthTo100);
+    QFETCH(qreal, expectedImplicitHeightAfterSettingWidthTo100);
+    QFETCH(qreal, expectedPaintedWidthAfterSettingWidthTo100);
+    QFETCH(qreal, expectedPaintedHeightAfterSettingWidthTo100);
+
+    QString componentStr = "import QtQuick 2.0\nImage { source: srcImage; }";
+    QQmlComponent component(&engine);
+    component.setData(componentStr.toLatin1(), QUrl::fromLocalFile(""));
+
+    engine.rootContext()->setContextProperty("srcImage", testFileUrl("heart-highdpi@2x.png"));
+
+    QScopedPointer<QQuickImage> image(qobject_cast<QQuickImage*>(component.create()));
+    QVERIFY(image);
+    QCOMPARE(image->width(), 150.0);
+    QCOMPARE(image->height(), 150.0);
+    QCOMPARE(image->paintedWidth(), 150.0);
+    QCOMPARE(image->paintedHeight(), 150.0);
+    QCOMPARE(image->implicitWidth(), 150.0);
+    QCOMPARE(image->implicitHeight(), 150.0);
+    QCOMPARE(image->paintedWidth(), 150.0);
+    QCOMPARE(image->paintedHeight(), 150.0);
+
+    // The implicit size should not change when setting any fillMode here.
+    image->setFillMode(fillMode);
+    QCOMPARE(image->fillMode(), fillMode);
+    QCOMPARE(image->implicitWidth(), 150.0);
+    QCOMPARE(image->implicitHeight(), 150.0);
+    QCOMPARE(image->paintedWidth(), 150.0);
+    QCOMPARE(image->paintedHeight(), 150.0);
+
+    image->setWidth(100.0);
+    QCOMPARE(image->width(), 100.0);
+    QCOMPARE(image->height(), expectedHeightAfterSettingWidthTo100);
+    QCOMPARE(image->implicitWidth(), 150.0);
+    QCOMPARE(image->implicitHeight(), expectedImplicitHeightAfterSettingWidthTo100);
+    QCOMPARE(image->paintedWidth(), expectedPaintedWidthAfterSettingWidthTo100);
+    QCOMPARE(image->paintedHeight(), expectedPaintedHeightAfterSettingWidthTo100);
 }
 
 void tst_qquickimage::hugeImages()

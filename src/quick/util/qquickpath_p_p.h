@@ -51,6 +51,10 @@
 // We mean it.
 //
 
+#include <private/qtquickglobal_p.h>
+
+QT_REQUIRE_CONFIG(quick_path);
+
 #include "qquickpath_p.h"
 
 #include <qqml.h>
@@ -60,7 +64,7 @@
 
 QT_BEGIN_NAMESPACE
 
-class QQuickPathPrivate : public QObjectPrivate
+class Q_QUICK_PRIVATE_EXPORT QQuickPathPrivate : public QObjectPrivate
 {
     Q_DECLARE_PUBLIC(QQuickPath)
 

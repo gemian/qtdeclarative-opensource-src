@@ -52,9 +52,14 @@
 //
 
 #include <QtQuick/private/qtquickglobal_p.h>
+
+QT_REQUIRE_CONFIG(quick_viewtransitions);
+
 #include <QtCore/qobject.h>
 #include <QtCore/qpoint.h>
 #include <QtQml/qqml.h>
+#include <private/qqmlguard_p.h>
+#include <private/qquicktransition_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -94,7 +99,7 @@ public:
     void addToTargetLists(QQuickItemViewTransitioner::TransitionType type, QQuickItemViewTransitionableItem *item, int index);
     void resetTargetLists();
 
-    QQuickTransition *transitionObject(QQuickItemViewTransitioner::TransitionType type, bool asTarget);
+    QQuickTransition *transitionObject(QQuickItemViewTransitioner::TransitionType type, bool asTarget) const;
     const QList<int> &targetIndexes(QQuickItemViewTransitioner::TransitionType type) const;
     const QList<QObject *> &targetItems(QQuickItemViewTransitioner::TransitionType type) const;
 
@@ -112,14 +117,14 @@ public:
     QList<QObject *> moveTransitionTargets;
     QList<QObject *> removeTransitionTargets;
 
-    QQuickTransition *populateTransition;
-    QQuickTransition *addTransition;
-    QQuickTransition *addDisplacedTransition;
-    QQuickTransition *moveTransition;
-    QQuickTransition *moveDisplacedTransition;
-    QQuickTransition *removeTransition;
-    QQuickTransition *removeDisplacedTransition;
-    QQuickTransition *displacedTransition;
+    QQmlGuard<QQuickTransition> populateTransition;
+    QQmlGuard<QQuickTransition> addTransition;
+    QQmlGuard<QQuickTransition> addDisplacedTransition;
+    QQmlGuard<QQuickTransition> moveTransition;
+    QQmlGuard<QQuickTransition> moveDisplacedTransition;
+    QQmlGuard<QQuickTransition> removeTransition;
+    QQmlGuard<QQuickTransition> removeDisplacedTransition;
+    QQmlGuard<QQuickTransition> displacedTransition;
 
 private:
     friend class QQuickItemViewTransitionJob;

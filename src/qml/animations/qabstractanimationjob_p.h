@@ -54,12 +54,14 @@
 #include <private/qtqmlglobal_p.h>
 #include <QtCore/QObject>
 #include <QtCore/private/qabstractanimation_p.h>
-#include "private/qpodvector_p.h"
+#include <vector>
 
 QT_BEGIN_NAMESPACE
 
 class QAnimationGroupJob;
 class QAnimationJobChangeListener;
+class QQmlAnimationTimer;
+
 class Q_QML_PRIVATE_EXPORT QAbstractAnimationJob
 {
     Q_DISABLE_COPY(QAbstractAnimationJob)
@@ -164,10 +166,11 @@ protected:
         QAbstractAnimationJob::ChangeTypes types;
         bool operator==(const ChangeListener &other) const { return listener == other.listener && types == other.types; }
     };
-    QPODVector<ChangeListener,1> changeListeners;
+    std::vector<ChangeListener> changeListeners;
 
     QAbstractAnimationJob *m_nextSibling;
     QAbstractAnimationJob *m_previousSibling;
+    QQmlAnimationTimer *m_timer = nullptr;
 
     bool *m_wasDeleted;
     bool m_hasRegisteredTimer:1;
@@ -203,26 +206,26 @@ public:
     static QQmlAnimationTimer *instance();
     static QQmlAnimationTimer *instance(bool create);
 
-    static void registerAnimation(QAbstractAnimationJob *animation, bool isTopLevel);
-    static void unregisterAnimation(QAbstractAnimationJob *animation);
+    void registerAnimation(QAbstractAnimationJob *animation, bool isTopLevel);
+    void unregisterAnimation(QAbstractAnimationJob *animation);
 
     /*
         this is used for updating the currentTime of all animations in case the pause
         timer is active or, otherwise, only of the animation passed as parameter.
     */
-    static void ensureTimerUpdate();
+    void ensureTimerUpdate();
 
     /*
         this will evaluate the need of restarting the pause timer in case there is still
         some pause animations running.
     */
-    static void updateAnimationTimer();
+    void updateAnimationTimer();
 
-    void restartAnimationTimer();
-    void updateAnimationsTime(qint64 timeStep);
+    void restartAnimationTimer() override;
+    void updateAnimationsTime(qint64 timeStep) override;
 
     //useful for profiling/debugging
-    int runningAnimationCount() { return animations.count(); }
+    int runningAnimationCount() override { return animations.count(); }
 
     bool hasStartAnimationPending() const { return startAnimationPending; }
 

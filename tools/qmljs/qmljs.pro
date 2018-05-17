@@ -5,4 +5,6 @@ SOURCES = qmljs.cpp
 
 include($$PWD/../../src/3rdparty/masm/masm-defs.pri)
 
+QMAKE_TARGET_DESCRIPTION = QML JavaScript Tool
+
 load(qt_tool)

@@ -39,7 +39,7 @@ using namespace WTF;
 namespace JSC { namespace Yarr {
 
 template<YarrJITCompileMode compileMode>
-class YarrGenerator : private MacroAssembler {
+class YarrGenerator : private DefaultMacroAssembler {
     friend void jitCompile(JSGlobalData*, YarrCodeBlock& jitObject, const String& pattern, unsigned& numSubpatterns, const char*& error, bool ignoreCase, bool multiline);
 
 #if CPU(ARM)
@@ -468,16 +468,16 @@ class YarrGenerator : private MacroAssembler {
 
         // The operation, as a YarrOpCode, and also a reference to the PatternTerm.
         YarrOpCode m_op;
-        PatternTerm* m_term;
+        PatternTerm* m_term = nullptr;
 
         // For alternatives, this holds the PatternAlternative and doubly linked
         // references to this alternative's siblings. In the case of the
         // OpBodyAlternativeEnd node at the end of a section of repeating nodes,
         // m_nextOp will reference the OpBodyAlternativeBegin node of the first
         // repeating alternative.
-        PatternAlternative* m_alternative;
-        size_t m_previousOp;
-        size_t m_nextOp;
+        PatternAlternative* m_alternative = nullptr;
+        size_t m_previousOp = 0;
+        size_t m_nextOp = 0;
 
         // Used to record a set of Jumps out of the generated code, typically
         // used for jumps out to backtracking code, and a single reentry back
@@ -599,7 +599,7 @@ class YarrGenerator : private MacroAssembler {
         }
 
         // Called at the end of code generation to link all return addresses.
-        void linkDataLabels(LinkBuffer& linkBuffer)
+        void linkDataLabels(LinkBuffer<JSC::DefaultMacroAssembler>& linkBuffer)
         {
             ASSERT(isEmpty());
             for (unsigned i = 0; i < m_backtrackRecords.size(); ++i)
@@ -2676,7 +2676,7 @@ public:
         backtrack();
 
         // Link & finalize the code.
-        LinkBuffer linkBuffer(*globalData, this, REGEXP_CODE_ID);
+        LinkBuffer<JSC::DefaultMacroAssembler> linkBuffer(*globalData, this, REGEXP_CODE_ID);
         m_backtrackingState.linkDataLabels(linkBuffer);
 
         if (compileMode == MatchOnly) {

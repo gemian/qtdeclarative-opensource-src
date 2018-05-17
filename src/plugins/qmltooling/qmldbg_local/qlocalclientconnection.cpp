@@ -43,6 +43,8 @@
 #include <QtCore/qplugin.h>
 #include <QtNetwork/qlocalsocket.h>
 
+Q_DECLARE_METATYPE(QLocalSocket::LocalSocketError)
+
 QT_BEGIN_NAMESPACE
 
 
@@ -55,20 +57,18 @@ public:
     QLocalClientConnection();
     ~QLocalClientConnection();
 
-    void setServer(QQmlDebugServer *server);
-    bool setPortRange(int portFrom, int portTo, bool block, const QString &hostaddress);
-    bool setFileName(const QString &filename, bool block);
+    void setServer(QQmlDebugServer *server) override;
+    bool setPortRange(int portFrom, int portTo, bool block, const QString &hostaddress) override;
+    bool setFileName(const QString &filename, bool block) override;
 
-    bool isConnected() const;
-    void disconnect();
+    bool isConnected() const override;
+    void disconnect() override;
 
-    void waitForConnection();
-    void flush();
-
-private slots:
-    void connectionEstablished();
+    void waitForConnection() override;
+    void flush() override;
 
 private:
+    void connectionEstablished();
     bool connectToServer();
 
     bool m_block;
@@ -135,7 +135,14 @@ bool QLocalClientConnection::connectToServer()
 {
     m_socket = new QLocalSocket;
     m_socket->setParent(this);
-    QObject::connect(m_socket, SIGNAL(connected()), this, SLOT(connectionEstablished()));
+    connect(m_socket, &QLocalSocket::connected,
+            this, &QLocalClientConnection::connectionEstablished);
+    connect(m_socket, static_cast<void(QLocalSocket::*)(QLocalSocket::LocalSocketError)>(
+                &QLocalSocket::error), m_socket, [this](QLocalSocket::LocalSocketError) {
+        m_socket->disconnectFromServer();
+        m_socket->connectToServer(m_filename);
+    }, Qt::QueuedConnection);
+
     m_socket->connectToServer(m_filename);
     qDebug("QML Debugger: Connecting to socket %s...", m_filename.toLatin1().constData());
     return true;

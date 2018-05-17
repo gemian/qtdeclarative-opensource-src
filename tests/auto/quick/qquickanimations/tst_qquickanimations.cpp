@@ -35,6 +35,7 @@
 #include <QtQuick/private/qquickitemanimation_p_p.h>
 #include <QtQuick/private/qquicktransition_p.h>
 #include <QtQuick/private/qquickanimation_p.h>
+#include <QtQuick/private/qquickanimatorjob_p.h>
 #include <QtQuick/private/qquickpathinterpolator_p.h>
 #include <QtQuick/private/qquickitem_p.h>
 #include <QEasingCurve>
@@ -101,6 +102,9 @@ private slots:
     void scriptActionCrash();
     void animatorInvalidTargetCrash();
     void defaultPropertyWarning();
+    void pathSvgAnimation();
+    void pathLineUnspecifiedXYBug();
+    void unsetAnimatorProxyJobWindow();
 };
 
 #define QTIMED_COMPARE(lhs, rhs) do { \
@@ -1521,6 +1525,64 @@ void tst_qquickanimations::defaultPropertyWarning()
     QVERIFY(root);
 
     QVERIFY(warnings.isEmpty());
+}
+
+// QTBUG-57666
+void tst_qquickanimations::pathSvgAnimation()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("pathSvgAnimation.qml"));
+    QScopedPointer<QQuickRectangle> rect(qobject_cast<QQuickRectangle*>(component.create()));
+    QVERIFY(rect);
+
+    QQuickRectangle *redRect = rect->findChild<QQuickRectangle*>();
+    QVERIFY(redRect);
+    QQuickPathAnimation *pathAnim = rect->findChild<QQuickPathAnimation*>();
+    QVERIFY(pathAnim);
+
+    QCOMPARE(redRect->x(), qreal(50));
+    QCOMPARE(redRect->y(), qreal(50));
+
+    pathAnim->start();
+    QTRY_COMPARE(redRect->x(), qreal(200));
+    QCOMPARE(redRect->y(), qreal(200));
+}
+
+// QTBUG-57666
+void tst_qquickanimations::pathLineUnspecifiedXYBug()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("pathLineUnspecifiedXYBug.qml"));
+    QScopedPointer<QQuickRectangle> rect(qobject_cast<QQuickRectangle*>(component.create()));
+    QVERIFY(rect);
+
+    QQuickRectangle *redRect = rect->findChild<QQuickRectangle*>();
+    QVERIFY(redRect);
+    QQuickPathAnimation *pathAnim = rect->findChild<QQuickPathAnimation*>();
+    QVERIFY(pathAnim);
+
+    QCOMPARE(redRect->x(), qreal(50));
+    QCOMPARE(redRect->y(), qreal(50));
+
+    pathAnim->start();
+    QTRY_COMPARE(redRect->x(), qreal(0));
+    QCOMPARE(redRect->y(), qreal(0));
+}
+
+void tst_qquickanimations::unsetAnimatorProxyJobWindow()
+{
+    QQuickWindow window;
+    QQuickItem item(window.contentItem());
+    QQuickAbstractAnimation animation(&item);
+    QAbstractAnimationJob *job = new QAbstractAnimationJob;
+    QQuickAnimatorProxyJob proxy(job, &animation);
+    QQuickItem dummy;
+    item.setParentItem(&dummy);
+    QSignalSpy spy(&window, SIGNAL(sceneGraphInitialized()));
+    window.show();
+    if (spy.count() < 1)
+        spy.wait();
+    QCOMPARE(proxy.job().data(), job);
 }
 
 QTEST_MAIN(tst_qquickanimations)

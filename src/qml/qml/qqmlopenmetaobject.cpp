@@ -278,7 +278,7 @@ int QQmlOpenMetaObject::metaCall(QObject *o, QMetaObject::Call c, int id, void *
             propertyRead(propId);
             *reinterpret_cast<QVariant *>(a[0]) = d->getData(propId);
         } else if (c == QMetaObject::WriteProperty) {
-            if (propId >= d->data.count() || d->data[propId].first != *reinterpret_cast<QVariant *>(a[0]))  {
+            if (propId >= d->data.count() || d->data.at(propId).first != *reinterpret_cast<QVariant *>(a[0]))  {
                 propertyWrite(propId);
                 QPair<QVariant, bool> &prop = d->getDataRef(propId);
                 prop.first = propertyWriteValue(propId, *reinterpret_cast<QVariant *>(a[0]));
@@ -376,7 +376,7 @@ void QQmlOpenMetaObject::setCached(bool c)
     QQmlData *qmldata = QQmlData::get(d->object, true);
     if (d->cacheProperties) {
         if (!d->type->d->cache)
-            d->type->d->cache = new QQmlPropertyCache(QV8Engine::getV4(d->type->d->engine), this);
+            d->type->d->cache = new QQmlPropertyCache(this);
         qmldata->propertyCache = d->type->d->cache;
         d->type->d->cache->addref();
     } else {

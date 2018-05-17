@@ -43,6 +43,7 @@
 #include "qquicktextinput_p.h"
 #include "qquicktext_p.h"
 #include "qquickimplicitsizeitem_p_p.h"
+#include "qquicktextutil_p.h"
 
 #include <QtQml/qqml.h>
 #include <QtCore/qelapsedtimer.h>
@@ -70,6 +71,7 @@
 QT_BEGIN_NAMESPACE
 
 class QQuickTextNode;
+class QInputControl;
 
 class Q_QUICK_PRIVATE_EXPORT QQuickTextInputPrivate : public QQuickImplicitSizeItemPrivate
 {
@@ -104,7 +106,7 @@ public:
         , selectionColor(QRgb(0xFF000080))
         , selectedTextColor(QRgb(0xFFFFFFFF))
         , m_cursor(0)
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
         , m_preeditCursor(0)
 #endif
         , m_blinkEnabled(false)
@@ -114,18 +116,14 @@ public:
         , m_undoState(0)
         , m_selstart(0)
         , m_selend(0)
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
         , inputMethodHints(Qt::ImhNone)
 #endif
         , hAlign(QQuickTextInput::AlignLeft)
         , vAlign(QQuickTextInput::AlignTop)
         , wrapMode(QQuickTextInput::NoWrap)
         , m_echoMode(QQuickTextInput::Normal)
-#if defined(QT_QUICK_DEFAULT_TEXT_RENDER_TYPE)
-        , renderType(QQuickTextInput::QT_QUICK_DEFAULT_TEXT_RENDER_TYPE)
-#else
-        , renderType(QQuickTextInput::QtRendering)
-#endif
+        , renderType(QQuickTextUtil::textRenderType<QQuickTextInput>())
         , updateType(UpdatePaintNode)
         , mouseSelectionMode(QQuickTextInput::SelectCharacters)
         , m_layoutDirection(Qt::LayoutDirectionAuto)
@@ -148,7 +146,7 @@ public:
         , m_separator(0)
         , m_readOnly(0)
         , m_textDirty(0)
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
         , m_preeditDirty(0)
 #endif
         , m_selDirty(0)
@@ -158,6 +156,7 @@ public:
         , m_passwordEchoEditing(false)
         , inLayout(false)
         , requireImplicitWidth(false)
+        , overwriteMode(false)
     {
     }
 
@@ -175,7 +174,7 @@ public:
     bool setHAlign(QQuickTextInput::HAlignment, bool forceAlign = false);
     void mirrorChange() Q_DECL_OVERRIDE;
     bool sendMouseEventToInputContext(QMouseEvent *event);
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     Qt::InputMethodHints effectiveInputMethodHints() const;
 #endif
     void handleFocusEvent(QFocusEvent *event);
@@ -210,7 +209,7 @@ public:
     QPointF tripleClickStartPoint;
 
     QPointer<QQmlComponent> cursorComponent;
-#ifndef QT_NO_VALIDATOR
+#if QT_CONFIG(validator)
     QPointer<QValidator> m_validator;
 #endif
 
@@ -227,6 +226,7 @@ public:
     QQuickItem *cursorItem;
     QQuickTextNode *textNode;
     MaskInputData *m_maskData;
+    QInputControl *m_inputControl;
 
     QList<int> m_transactions;
     QVector<Command> m_history;
@@ -239,7 +239,7 @@ public:
     int lastSelectionStart;
     int lastSelectionEnd;
     int m_cursor;
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     int m_preeditCursor;
 #endif
     bool m_blinkEnabled;
@@ -256,7 +256,7 @@ public:
         UpdatePaintNode
     };
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     Qt::InputMethodHints inputMethodHints;
 #endif
     QQuickTextInput::HAlignment hAlign;
@@ -289,7 +289,7 @@ public:
     bool m_separator : 1;
     bool m_readOnly : 1;
     bool m_textDirty : 1;
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     bool m_preeditDirty : 1;
 #endif
     bool m_selDirty : 1;
@@ -299,6 +299,7 @@ public:
     bool m_passwordEchoEditing : 1;
     bool inLayout:1;
     bool requireImplicitWidth:1;
+    bool overwriteMode:1;
 
     static inline QQuickTextInputPrivate *get(QQuickTextInput *t) {
         return t->d_func();
@@ -360,12 +361,12 @@ public:
 
     QString realText() const;
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
     void copy(QClipboard::Mode mode = QClipboard::Clipboard) const;
     void paste(QClipboard::Mode mode = QClipboard::Clipboard);
 #endif
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     void commitPreedit();
     void cancelPreedit();
 #endif
@@ -417,7 +418,7 @@ public:
     }
 
     // input methods
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     bool composeMode() const { return !m_textLayout.preeditAreaText().isEmpty(); }
 
     QString preeditAreaText() const { return m_textLayout.preeditAreaText(); }
@@ -439,7 +440,7 @@ public:
         }
     }
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     void processInputMethodEvent(QInputMethodEvent *event);
 #endif
     void processKeyEvent(QKeyEvent* ev);
@@ -494,7 +495,7 @@ private:
     void deleteEndOfLine();
 
     enum ValidatorState {
-#ifndef QT_NO_VALIDATOR
+#if QT_CONFIG(validator)
         InvalidInput        = QValidator::Invalid,
         IntermediateInput   = QValidator::Intermediate,
         AcceptableInput     = QValidator::Acceptable

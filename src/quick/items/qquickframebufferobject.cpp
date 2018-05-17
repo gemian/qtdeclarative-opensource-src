@@ -40,10 +40,13 @@
 #include "qquickframebufferobject.h"
 
 #include <QtGui/QOpenGLFramebufferObject>
-
+#include <QtGui/QOpenGLFunctions>
 #include <private/qquickitem_p.h>
+#include <private/qsgadaptationlayer_p.h>
+#include <qsgtextureprovider.h>
 
 #include <QSGSimpleTextureNode>
+#include <QSGRendererInterface>
 
 QT_BEGIN_NAMESPACE
 
@@ -257,8 +260,14 @@ public:
     bool renderPending;
     bool invalidatePending;
 
-    int devicePixelRatio;
+    qreal devicePixelRatio;
 };
+
+static inline bool isOpenGL(QSGRenderContext *rc)
+{
+    QSGRendererInterface *rif = rc->sceneGraphContext()->rendererInterface(rc);
+    return !rif || rif->graphicsApi() == QSGRendererInterface::OpenGL;
+}
 
 /*!
  * \internal
@@ -278,6 +287,8 @@ QSGNode *QQuickFramebufferObject::updatePaintNode(QSGNode *node, UpdatePaintNode
     Q_D(QQuickFramebufferObject);
 
     if (!n) {
+        if (!isOpenGL(d->sceneGraphRenderContext()))
+            return 0;
         if (!d->node)
             d->node = new QSGFramebufferObjectNode;
         n = d->node;
@@ -301,14 +312,13 @@ QSGNode *QQuickFramebufferObject::updatePaintNode(QSGNode *node, UpdatePaintNode
     n->devicePixelRatio = window()->effectiveDevicePixelRatio();
     desiredFboSize *= n->devicePixelRatio;
 
-    if (n->fbo && (d->followsItemSize || n->invalidatePending)) {
-        if (n->fbo->size() != desiredFboSize) {
-            delete n->fbo;
-            n->fbo = 0;
-            delete n->msDisplayFbo;
-            n->msDisplayFbo = 0;
-            n->invalidatePending = false;
-        }
+    if (n->fbo && ((d->followsItemSize && n->fbo->size() != desiredFboSize) || n->invalidatePending)) {
+        delete n->texture();
+        delete n->fbo;
+        n->fbo = 0;
+        delete n->msDisplayFbo;
+        n->msDisplayFbo = 0;
+        n->invalidatePending = false;
     }
 
     if (!n->fbo) {
@@ -360,6 +370,8 @@ QSGTextureProvider *QQuickFramebufferObject::textureProvider() const
         qWarning("QQuickFramebufferObject::textureProvider: can only be queried on the rendering thread of an exposed window");
         return 0;
     }
+    if (!isOpenGL(d->sceneGraphRenderContext()))
+        return 0;
     if (!d->node)
         d->node = new QSGFramebufferObjectNode;
     return d->node;
@@ -523,5 +535,6 @@ void QQuickFramebufferObject::Renderer::update()
 
 
 #include "qquickframebufferobject.moc"
+#include "moc_qquickframebufferobject.cpp"
 
 QT_END_NAMESPACE

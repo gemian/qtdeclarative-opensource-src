@@ -326,7 +326,6 @@ QObject *QQmlGuiProvider::application(QObject *) { return new QQmlApplication();
 QStringList QQmlGuiProvider::fontFamilies() { return QStringList(); }
 bool QQmlGuiProvider::openUrlExternally(QUrl &) { return false; }
 
-#ifndef QT_NO_IM
 QObject *QQmlGuiProvider::inputMethod()
 {
     // We don't have any input method code by default
@@ -335,7 +334,6 @@ QObject *QQmlGuiProvider::inputMethod()
     QQmlEngine::setObjectOwnership(o, QQmlEngine::JavaScriptOwnership);
     return o;
 }
-#endif
 
 QObject *QQmlGuiProvider::styleHints()
 {
@@ -344,6 +342,8 @@ QObject *QQmlGuiProvider::styleHints()
     QQmlEngine::setObjectOwnership(o, QQmlEngine::JavaScriptOwnership);
     return o;
 }
+
+QString QQmlGuiProvider::pluginName() const { return QString(); }
 
 static QQmlGuiProvider *guiProvider = 0;
 
@@ -452,3 +452,5 @@ void QQmlApplication::setDomain(const QString &arg)
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qqmlglobal_p.cpp"

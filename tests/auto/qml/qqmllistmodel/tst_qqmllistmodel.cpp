@@ -122,6 +122,8 @@ private slots:
     void datetime_data();
     void about_to_be_signals();
     void modify_through_delegate();
+    void bindingsOnGetResult();
+    void stringifyModelEntry();
 };
 
 bool tst_qqmllistmodel::compareVariantList(const QVariantList &testList, QVariant object)
@@ -1203,8 +1205,8 @@ void tst_qqmllistmodel::role_mode_data()
     QTest::newRow("default1") << "{append({'a':1});dynamicRoles}" << 0 << "";
 
     QTest::newRow("enableDynamic0") << "{dynamicRoles=true;dynamicRoles}" << 1 << "";
-    QTest::newRow("enableDynamic1") << "{append({'a':1});dynamicRoles=true;dynamicRoles}" << 0 << "<Unknown File>: QML ListModel: unable to enable dynamic roles as this model is not empty!";
-    QTest::newRow("enableDynamic2") << "{dynamicRoles=true;append({'a':1});dynamicRoles=false;dynamicRoles}" << 1 << "<Unknown File>: QML ListModel: unable to enable static roles as this model is not empty!";
+    QTest::newRow("enableDynamic1") << "{append({'a':1});dynamicRoles=true;dynamicRoles}" << 0 << "<Unknown File>: QML ListModel: unable to enable dynamic roles as this model is not empty";
+    QTest::newRow("enableDynamic2") << "{dynamicRoles=true;append({'a':1});dynamicRoles=false;dynamicRoles}" << 1 << "<Unknown File>: QML ListModel: unable to enable static roles as this model is not empty";
 }
 
 void tst_qqmllistmodel::role_mode()
@@ -1467,6 +1469,40 @@ void tst_qqmllistmodel::modify_through_delegate()
 
     QCOMPARE(model->data(model->index(0, 0, QModelIndex()), roleNames.key("age")).toInt(), 18);
     QCOMPARE(model->data(model->index(1, 0, QModelIndex()), roleNames.key("age")).toInt(), 18);
+}
+
+void tst_qqmllistmodel::bindingsOnGetResult()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, testFileUrl("bindingsOnGetResult.qml"));
+    QVERIFY2(!component.isError(), qPrintable(component.errorString()));
+
+    QScopedPointer<QObject> obj(component.create());
+    QVERIFY(!obj.isNull());
+
+    QVERIFY(obj->property("success").toBool());
+}
+
+void tst_qqmllistmodel::stringifyModelEntry()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+                      "import QtQuick 2.0\n"
+                      "Item {\n"
+                      "   ListModel {\n"
+                      "       id: testModel\n"
+                      "       objectName: \"testModel\"\n"
+                      "       ListElement { name: \"Joe\"; age: 22 }\n"
+                      "   }\n"
+                      "}\n", QUrl());
+    QScopedPointer<QObject> scene(component.create());
+    QQmlListModel *model = scene->findChild<QQmlListModel*>("testModel");
+    QQmlExpression expr(engine.rootContext(), model, "JSON.stringify(get(0));");
+    QVariant v = expr.evaluate();
+    QVERIFY2(!expr.hasError(), QTest::toString(expr.error().toString()));
+    const QString expectedString = QStringLiteral("{\"age\":22,\"name\":\"Joe\"}");
+    QCOMPARE(v.toString(), expectedString);
 }
 
 QTEST_MAIN(tst_qqmllistmodel)

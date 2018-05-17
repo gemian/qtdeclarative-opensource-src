@@ -42,6 +42,7 @@
 #include <QtQml/qqml.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
+#include <qpa/qwindowsysteminterface.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -120,21 +121,42 @@ bool QuickTestEvent::keyClickChar(const QString &character, int modifiers, int d
     return true;
 }
 
+// valueToKeySequence() is copied from qquickshortcut.cpp
+static QKeySequence valueToKeySequence(const QVariant &value)
+{
+    if (value.type() == QVariant::Int)
+        return QKeySequence(static_cast<QKeySequence::StandardKey>(value.toInt()));
+    return QKeySequence::fromString(value.toString());
+}
+
+bool QuickTestEvent::keySequence(const QVariant &keySequence)
+{
+    QWindow *window = activeWindow();
+    if (!window)
+        return false;
+    QTest::keySequence(window, valueToKeySequence(keySequence));
+    return true;
+}
+
 namespace QtQuickTest
 {
     enum MouseAction { MousePress, MouseRelease, MouseClick, MouseDoubleClick, MouseMove, MouseDoubleClickSequence };
 
+    int lastMouseTimestamp = 0;
+
     static void mouseEvent(MouseAction action, QWindow *window,
                            QObject *item, Qt::MouseButton button,
-                           Qt::KeyboardModifiers stateKey, QPointF _pos, int delay=-1)
+                           Qt::KeyboardModifiers stateKey, const QPointF &_pos, int delay=-1)
     {
         QTEST_ASSERT(window);
         QTEST_ASSERT(item);
 
         if (delay == -1 || delay < QTest::defaultMouseDelay())
             delay = QTest::defaultMouseDelay();
-        if (delay > 0)
+        if (delay > 0) {
             QTest::qWait(delay);
+            lastMouseTimestamp += delay;
+        }
 
         if (action == MouseClick) {
             mouseEvent(MousePress, window, item, button, stateKey, _pos);
@@ -151,7 +173,7 @@ namespace QtQuickTest
             return;
         }
 
-        QPoint pos;
+        QPoint pos = _pos.toPoint();
         QQuickItem *sgitem = qobject_cast<QQuickItem *>(item);
         if (sgitem)
             pos = sgitem->mapToScene(_pos).toPoint();
@@ -165,16 +187,21 @@ namespace QtQuickTest
         {
             case MousePress:
                 me = QMouseEvent(QEvent::MouseButtonPress, pos, window->mapToGlobal(pos), button, button, stateKey);
+                me.setTimestamp(++lastMouseTimestamp);
                 break;
             case MouseRelease:
                 me = QMouseEvent(QEvent::MouseButtonRelease, pos, window->mapToGlobal(pos), button, 0, stateKey);
+                me.setTimestamp(++lastMouseTimestamp);
+                lastMouseTimestamp += 500; // avoid double clicks being generated
                 break;
             case MouseDoubleClick:
                 me = QMouseEvent(QEvent::MouseButtonDblClick, pos, window->mapToGlobal(pos), button, button, stateKey);
+                me.setTimestamp(++lastMouseTimestamp);
                 break;
             case MouseMove:
                 // with move event the button is NoButton, but 'buttons' holds the currently pressed buttons
                 me = QMouseEvent(QEvent::MouseMove, pos, window->mapToGlobal(pos), Qt::NoButton, button, stateKey);
+                me.setTimestamp(++lastMouseTimestamp);
                 break;
             default:
                 QTEST_ASSERT(false);
@@ -188,7 +215,7 @@ namespace QtQuickTest
         }
     }
 
-#ifndef QT_NO_WHEELEVENT
+#if QT_CONFIG(wheelevent)
     static void mouseWheel(QWindow* window, QObject* item, Qt::MouseButtons buttons,
                                 Qt::KeyboardModifiers stateKey,
                                 QPointF _pos, int xDelta, int yDelta, int delay = -1)
@@ -232,7 +259,7 @@ bool QuickTestEvent::mousePress
     return true;
 }
 
-#ifndef QT_NO_WHEELEVENT
+#if QT_CONFIG(wheelevent)
 bool QuickTestEvent::mouseWheel(
     QObject *item, qreal x, qreal y, int buttons,
     int modifiers, int xDelta, int yDelta, int delay)
@@ -317,6 +344,10 @@ bool QuickTestEvent::mouseMove
 
 QWindow *QuickTestEvent::eventWindow(QObject *item)
 {
+    QWindow * window = qobject_cast<QWindow *>(item);
+    if (window)
+        return window;
+
     QQuickItem *quickItem = qobject_cast<QQuickItem *>(item);
     if (quickItem)
         return quickItem->window();
@@ -332,6 +363,98 @@ QWindow *QuickTestEvent::activeWindow()
     if (QWindow *window = QGuiApplication::focusWindow())
         return window;
     return eventWindow();
+}
+
+QQuickTouchEventSequence::QQuickTouchEventSequence(QuickTestEvent *testEvent, QObject *item)
+        : QObject(testEvent)
+        , m_sequence(QTest::touchEvent(testEvent->eventWindow(item), testEvent->touchDevice()))
+        , m_testEvent(testEvent)
+{
+}
+
+QObject *QQuickTouchEventSequence::press(int touchId, QObject *item, qreal x, qreal y)
+{
+    QWindow *view = m_testEvent->eventWindow(item);
+    if (view) {
+        QPointF pos(x, y);
+        QQuickItem *quickItem = qobject_cast<QQuickItem *>(item);
+        if (quickItem) {
+            pos = quickItem->mapToScene(pos);
+        }
+        m_sequence.press(touchId, pos.toPoint(), view);
+    }
+    return this;
+}
+
+QObject *QQuickTouchEventSequence::move(int touchId, QObject *item, qreal x, qreal y)
+{
+    QWindow *view = m_testEvent->eventWindow(item);
+    if (view) {
+        QPointF pos(x, y);
+        QQuickItem *quickItem = qobject_cast<QQuickItem *>(item);
+        if (quickItem) {
+            pos = quickItem->mapToScene(pos);
+        }
+        m_sequence.move(touchId, pos.toPoint(), view);
+    }
+    return this;
+}
+
+QObject *QQuickTouchEventSequence::release(int touchId, QObject *item, qreal x, qreal y)
+{
+    QWindow *view = m_testEvent->eventWindow(item);
+    if (view) {
+        QPointF pos(x, y);
+        QQuickItem *quickItem = qobject_cast<QQuickItem *>(item);
+        if (quickItem) {
+            pos = quickItem->mapToScene(pos);
+        }
+        m_sequence.release(touchId, pos.toPoint(), view);
+    }
+    return this;
+}
+
+QObject *QQuickTouchEventSequence::stationary(int touchId)
+{
+    m_sequence.stationary(touchId);
+    return this;
+}
+
+QObject *QQuickTouchEventSequence::commit()
+{
+    m_sequence.commit();
+    return this;
+}
+
+/*!
+    Return a simulated touchscreen, creating one if necessary
+
+    \internal
+*/
+
+QTouchDevice *QuickTestEvent::touchDevice()
+{
+    static QTouchDevice *device(nullptr);
+
+    if (!device) {
+        device = new QTouchDevice;
+        device->setType(QTouchDevice::TouchScreen);
+        QWindowSystemInterface::registerTouchDevice(device);
+    }
+    return device;
+}
+
+/*!
+    Creates a new QQuickTouchEventSequence.
+
+    If valid, \a item determines the QWindow that touch events are sent to.
+    Test code should use touchEvent() from the QML TestCase type.
+
+    \internal
+*/
+QQuickTouchEventSequence *QuickTestEvent::touchEvent(QObject *item)
+{
+    return new QQuickTouchEventSequence(this, item);
 }
 
 QT_END_NAMESPACE

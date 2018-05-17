@@ -6,9 +6,8 @@ osx:CONFIG -= app_bundle
 
 SOURCES +=     tst_qqmldebugjs.cpp
 
-INCLUDEPATH += ../../shared
-include(../../../../shared/util.pri)
 include(../../shared/debugutil.pri)
+include(../../shared/qqmlenginedebugclient.pri)
 
 TESTDATA = data/*
 

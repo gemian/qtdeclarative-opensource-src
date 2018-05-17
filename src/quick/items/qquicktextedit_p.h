@@ -86,6 +86,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextEdit : public QQuickImplicitSizeItem
     Q_PROPERTY(int cursorPosition READ cursorPosition WRITE setCursorPosition NOTIFY cursorPositionChanged)
     Q_PROPERTY(QRectF cursorRectangle READ cursorRectangle NOTIFY cursorRectangleChanged)
     Q_PROPERTY(QQmlComponent* cursorDelegate READ cursorDelegate WRITE setCursorDelegate NOTIFY cursorDelegateChanged)
+    Q_PROPERTY(bool overwriteMode READ overwriteMode WRITE setOverwriteMode NOTIFY overwriteModeChanged)
     Q_PROPERTY(int selectionStart READ selectionStart NOTIFY selectionStartChanged)
     Q_PROPERTY(int selectionEnd READ selectionEnd NOTIFY selectionEndChanged)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectedTextChanged)
@@ -110,6 +111,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickTextEdit : public QQuickImplicitSizeItem
     Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION 6)
     Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
     Q_PROPERTY(QString preeditText READ preeditText NOTIFY preeditTextChanged REVISION 7)
+    Q_PROPERTY(qreal tabStopDistance READ tabStopDistance WRITE setTabStopDistance NOTIFY tabStopDistanceChanged REVISION 10)
 
 public:
     QQuickTextEdit(QQuickItem *parent=0);
@@ -199,6 +201,9 @@ public:
     QQmlComponent* cursorDelegate() const;
     void setCursorDelegate(QQmlComponent*);
 
+    bool overwriteMode() const;
+    void setOverwriteMode(bool overwrite);
+
     int selectionStart() const;
     int selectionEnd() const;
 
@@ -238,7 +243,7 @@ public:
 
     QRectF cursorRectangle() const;
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     QVariant inputMethodQuery(Qt::InputMethodQuery property) const Q_DECL_OVERRIDE;
     Q_REVISION(4) Q_INVOKABLE QVariant inputMethodQuery(Qt::InputMethodQuery query, QVariant argument) const;
 #endif
@@ -292,6 +297,9 @@ public:
     void setBottomPadding(qreal padding);
     void resetBottomPadding();
 
+    int tabStopDistance() const;
+    void setTabStopDistance(qreal distance);
+
 Q_SIGNALS:
     void textChanged();
     Q_REVISION(7) void preeditTextChanged();
@@ -313,6 +321,7 @@ Q_SIGNALS:
     void readOnlyChanged(bool isReadOnly);
     void cursorVisibleChanged(bool isCursorVisible);
     void cursorDelegateChanged();
+    void overwriteModeChanged(bool overwriteMode);
     void activeFocusOnPressChanged(bool activeFocusOnPressed);
     void persistentSelectionChanged(bool isPersistentSelection);
     void textMarginChanged(qreal textMargin);
@@ -335,6 +344,7 @@ Q_SIGNALS:
     Q_REVISION(6) void leftPaddingChanged();
     Q_REVISION(6) void rightPaddingChanged();
     Q_REVISION(6) void bottomPaddingChanged();
+    Q_REVISION(10) void tabStopDistanceChanged(qreal distance);
 
 public Q_SLOTS:
     void selectAll();
@@ -342,7 +352,7 @@ public Q_SLOTS:
     void select(int start, int end);
     void deselect();
     bool isRightToLeft(int start, int end);
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
     void cut();
     void copy();
     void paste();
@@ -394,7 +404,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
     void mouseDoubleClickEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
     void mouseMoveEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     void inputMethodEvent(QInputMethodEvent *e) Q_DECL_OVERRIDE;
 #endif
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData) Q_DECL_OVERRIDE;

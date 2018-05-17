@@ -37,6 +37,7 @@ namespace JSC {
 class MacroAssemblerX86_64 : public MacroAssemblerX86Common {
 public:
     static const Scale ScalePtr = TimesEight;
+    static const int PointerSize = 8;
 
     using MacroAssemblerX86Common::add32;
     using MacroAssemblerX86Common::and32;
@@ -51,6 +52,33 @@ public:
     using MacroAssemblerX86Common::addDouble;
     using MacroAssemblerX86Common::loadDouble;
     using MacroAssemblerX86Common::convertInt32ToDouble;
+
+#if defined(V4_BOOTSTRAP)
+    void loadPtr(ImplicitAddress address, RegisterID dest)
+    {
+        load64(address, dest);
+    }
+
+    void subPtr(TrustedImm32 imm, RegisterID dest)
+    {
+        sub64(imm, dest);
+    }
+
+    void addPtr(TrustedImm32 imm, RegisterID dest)
+    {
+        add64(imm, dest);
+    }
+
+    void addPtr(TrustedImm32 imm, RegisterID src, RegisterID dest)
+    {
+        add64(imm, src, dest);
+    }
+
+    void storePtr(RegisterID src, ImplicitAddress address)
+    {
+        store64(src, address);
+    }
+#endif
 
     void add32(TrustedImm32 imm, AbsoluteAddress address)
     {
@@ -300,14 +328,61 @@ public:
         m_assembler.xorq_ir(imm.m_value, srcDest);
     }
 
+    void lshift64(TrustedImm32 imm, RegisterID dest)
+    {
+        m_assembler.shlq_i8r(imm.m_value, dest);
+    }
+
+    void lshift64(RegisterID src, RegisterID dest)
+    {
+        if (src == X86Registers::ecx)
+            m_assembler.shlq_CLr(dest);
+        else {
+            ASSERT(src != dest);
+
+            // Can only shift by ecx, so we do some swapping if we see anything else.
+            swap(src, X86Registers::ecx);
+            m_assembler.shlq_CLr(dest == X86Registers::ecx ? src : dest);
+            swap(src, X86Registers::ecx);
+        }
+    }
+
+    void rshift64(TrustedImm32 imm, RegisterID dest)
+    {
+        m_assembler.sarq_i8r(imm.m_value, dest);
+    }
+
+    void rshift64(RegisterID src, RegisterID dest)
+    {
+        if (src == X86Registers::ecx)
+            m_assembler.sarq_CLr(dest);
+        else {
+            ASSERT(src != dest);
+
+            // Can only shift by ecx, so we do some swapping if we see anything else.
+            swap(src, X86Registers::ecx);
+            m_assembler.sarq_CLr(dest == X86Registers::ecx ? src : dest);
+            swap(src, X86Registers::ecx);
+        }
+    }
+
     void urshift64(TrustedImm32 imm, RegisterID dest)
     {
         m_assembler.shrq_i8r(imm.m_value, dest);
     }
 
-    void lshift64(TrustedImm32 imm, RegisterID dest)
+    void urshift64(RegisterID src, RegisterID dest)
     {
-        m_assembler.shlq_i8r(imm.m_value, dest);
+        if (src == X86Registers::ecx)
+            m_assembler.shrq_CLr(dest);
+        else {
+            ASSERT(src != dest);
+
+            // Can only shift by ecx, so we do some swapping if we see anything else.
+            swap(src, X86Registers::ecx);
+            m_assembler.shrq_CLr(dest == X86Registers::ecx ? src : dest);
+            swap(src, X86Registers::ecx);
+        }
     }
 
     void load64(ImplicitAddress address, RegisterID dest)
@@ -634,7 +709,7 @@ public:
     }
 
 private:
-    friend class LinkBuffer;
+    template <typename, template <typename> class> friend class LinkBufferBase;
     friend class RepatchBuffer;
 
     static void linkCall(void* code, Call call, FunctionPtr function)

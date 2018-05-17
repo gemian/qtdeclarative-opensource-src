@@ -43,6 +43,7 @@
 #include <qv4identifier_p.h>
 #include "qv4object_p.h"
 #include "qv4identifiertable_p.h"
+#include "qv4value_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -101,23 +102,11 @@ void PropertyHash::addEntry(const PropertyHash::Entry &entry, int classSize)
     ++d->size;
 }
 
-uint PropertyHash::lookup(const Identifier *identifier) const
-{
-    Q_ASSERT(d->entries);
-
-    uint idx = identifier->hashValue % d->alloc;
-    while (1) {
-        if (d->entries[idx].identifier == identifier)
-            return d->entries[idx].index;
-        if (!d->entries[idx].identifier)
-            return UINT_MAX;
-        ++idx;
-        idx %= d->alloc;
-    }
-}
 
 InternalClass::InternalClass(ExecutionEngine *engine)
     : engine(engine)
+    , vtable(0)
+    , prototype(0)
     , m_sealed(0)
     , m_frozen(0)
     , size(0)
@@ -129,6 +118,8 @@ InternalClass::InternalClass(ExecutionEngine *engine)
 InternalClass::InternalClass(const QV4::InternalClass &other)
     : QQmlJS::Managed()
     , engine(other.engine)
+    , vtable(other.vtable)
+    , prototype(other.prototype)
     , propertyTable(other.propertyTable)
     , nameMap(other.nameMap)
     , propertyData(other.propertyData)
@@ -142,44 +133,20 @@ InternalClass::InternalClass(const QV4::InternalClass &other)
 
 static void insertHoleIntoPropertyData(Object *object, int idx)
 {
-    int inlineSize = object->d()->inlineMemberSize;
-    int icSize = object->internalClass()->size;
-    int from = qMax(idx, inlineSize);
-    int to = from + 1;
-    if (from < icSize)
-        memmove(object->propertyData(to), object->propertyData(from), icSize - from - 1);
-    if (from == idx)
-        return;
-    if (inlineSize < icSize)
-        *object->propertyData(inlineSize) = *object->propertyData(inlineSize - 1);
-    from = idx;
-    to = from + 1;
-    if (from < inlineSize - 1)
-        memmove(object->propertyData(to), object->propertyData(from), inlineSize - from - 1);
+    Heap::Object *o = object->d();
+    ExecutionEngine *v4 = o->internalClass->engine;
+    int size = o->internalClass->size;
+    for (int i = size - 1; i > idx; --i)
+        o->setProperty(v4, i, *o->propertyData(i - 1));
 }
 
 static void removeFromPropertyData(Object *object, int idx, bool accessor = false)
 {
-    int inlineSize = object->d()->inlineMemberSize;
-    int delta = (accessor ? 2 : 1);
-    int oldSize = object->internalClass()->size + delta;
-    int to = idx;
-    int from = to + delta;
-    if (from < inlineSize) {
-        memmove(object->propertyData(to), object->d()->propertyData(from), (inlineSize - from)*sizeof(Value));
-        to = inlineSize - delta;
-        from = inlineSize;
-    }
-    if (to < inlineSize && from < oldSize) {
-        Q_ASSERT(from >= inlineSize);
-        memcpy(object->propertyData(to), object->d()->propertyData(from), (inlineSize - to)*sizeof(Value));
-        to = inlineSize;
-        from = inlineSize + delta;
-    }
-    if (from < oldSize) {
-        Q_ASSERT(to >= inlineSize && from > to);
-        memmove(object->propertyData(to), object->d()->propertyData(from), (oldSize - to)*sizeof(Value));
-    }
+    Heap::Object *o = object->d();
+    ExecutionEngine *v4 = o->internalClass->engine;
+    int size = o->internalClass->size;
+    for (int i = idx; i < size; ++i)
+        o->setProperty(v4, i, *o->propertyData(i + (accessor ? 2 : 1)));
 }
 
 void InternalClass::changeMember(Object *object, String *string, PropertyAttributes data, uint *index)
@@ -193,7 +160,7 @@ void InternalClass::changeMember(Object *object, String *string, PropertyAttribu
     object->setInternalClass(newClass);
     if (newClass->size > oldClass->size) {
         Q_ASSERT(newClass->size == oldClass->size + 1);
-        insertHoleIntoPropertyData(object, idx + 1);
+        insertHoleIntoPropertyData(object, idx);
     } else if (newClass->size < oldClass->size) {
         Q_ASSERT(newClass->size == oldClass->size - 1);
         removeFromPropertyData(object, idx + 1);
@@ -223,13 +190,14 @@ InternalClass *InternalClass::changeMember(Identifier *identifier, PropertyAttri
     if (data == propertyData.at(idx))
         return this;
 
-    Transition temp = { identifier, 0, (int)data.flags() };
+    Transition temp = { { identifier }, nullptr, (int)data.flags() };
     Transition &t = lookupOrInsertTransition(temp);
     if (t.lookup)
         return t.lookup;
 
     // create a new class and add it to the tree
-    InternalClass *newClass = engine->emptyClass;
+    InternalClass *newClass = engine->internalClasses[EngineBase::Class_Empty]->changeVTable(vtable);
+    newClass = newClass->changePrototype(prototype);
     for (uint i = 0; i < size; ++i) {
         if (i == idx) {
             newClass = newClass->addMember(nameMap.at(i), data);
@@ -243,12 +211,72 @@ InternalClass *InternalClass::changeMember(Identifier *identifier, PropertyAttri
     return newClass;
 }
 
+InternalClass *InternalClass::changePrototypeImpl(Heap::Object *proto)
+{
+    Q_ASSERT(prototype != proto);
+
+    Transition temp = { { nullptr }, 0, Transition::PrototypeChange };
+    temp.prototype = proto;
+
+    Transition &t = lookupOrInsertTransition(temp);
+    if (t.lookup)
+        return t.lookup;
+
+    // create a new class and add it to the tree
+    InternalClass *newClass;
+    if (!size && !prototype) {
+        newClass = engine->newClass(*this);
+        newClass->prototype = proto;
+    } else {
+        newClass = engine->internalClasses[EngineBase::Class_Empty]->changeVTable(vtable);
+        newClass = newClass->changePrototype(proto);
+        for (uint i = 0; i < size; ++i) {
+            if (!propertyData.at(i).isEmpty())
+                newClass = newClass->addMember(nameMap.at(i), propertyData.at(i));
+        }
+    }
+
+    t.lookup = newClass;
+    return newClass;
+}
+
+InternalClass *InternalClass::changeVTableImpl(const VTable *vt)
+{
+    Q_ASSERT(vtable != vt);
+
+    Transition temp = { { nullptr }, nullptr, Transition::VTableChange };
+    temp.vtable = vt;
+
+    Transition &t = lookupOrInsertTransition(temp);
+    if (t.lookup)
+        return t.lookup;
+
+    // create a new class and add it to the tree
+    InternalClass *newClass;
+    if (this == engine->internalClasses[EngineBase::Class_Empty]) {
+        newClass = engine->newClass(*this);
+        newClass->vtable = vt;
+    } else {
+        newClass = engine->internalClasses[EngineBase::Class_Empty]->changeVTable(vt);
+        newClass = newClass->changePrototype(prototype);
+        for (uint i = 0; i < size; ++i) {
+            if (!propertyData.at(i).isEmpty())
+                newClass = newClass->addMember(nameMap.at(i), propertyData.at(i));
+        }
+    }
+
+    t.lookup = newClass;
+    Q_ASSERT(t.lookup);
+    Q_ASSERT(newClass->vtable);
+    return newClass;
+}
+
 InternalClass *InternalClass::nonExtensible()
 {
     if (!extensible)
         return this;
 
-    Transition temp = { Q_NULLPTR, Q_NULLPTR, Transition::NotExtensible};
+    Transition temp = { { nullptr }, nullptr, Transition::NotExtensible};
     Transition &t = lookupOrInsertTransition(temp);
     if (t.lookup)
         return t.lookup;
@@ -296,7 +324,7 @@ InternalClass *InternalClass::addMember(Identifier *identifier, PropertyAttribut
 
 InternalClass *InternalClass::addMemberImpl(Identifier *identifier, PropertyAttributes data, uint *index)
 {
-    Transition temp = { identifier, 0, (int)data.flags() };
+    Transition temp = { { identifier }, nullptr, (int)data.flags() };
     Transition &t = lookupOrInsertTransition(temp);
 
     if (index)
@@ -332,7 +360,7 @@ void InternalClass::removeMember(Object *object, Identifier *id)
     uint propIdx = oldClass->propertyTable.lookup(id);
     Q_ASSERT(propIdx < oldClass->size);
 
-    Transition temp = { id, 0, -1 };
+    Transition temp = { { id }, nullptr, -1 };
     Transition &t = object->internalClass()->lookupOrInsertTransition(temp);
 
     bool accessor = oldClass->propertyData.at(propIdx).isAccessor();
@@ -341,7 +369,8 @@ void InternalClass::removeMember(Object *object, Identifier *id)
         object->setInternalClass(t.lookup);
     } else {
         // create a new class and add it to the tree
-        InternalClass *newClass = oldClass->engine->emptyClass;
+        InternalClass *newClass = oldClass->engine->internalClasses[EngineBase::Class_Empty]->changeVTable(oldClass->vtable);
+        newClass = newClass->changePrototype(oldClass->prototype);
         for (uint i = 0; i < oldClass->size; ++i) {
             if (i == propIdx)
                 continue;
@@ -360,20 +389,11 @@ void InternalClass::removeMember(Object *object, Identifier *id)
     Q_ASSERT(t.lookup);
 }
 
-uint InternalClass::find(const String *string)
+uint QV4::InternalClass::find(const String *string)
 {
     engine->identifierTable->identifier(string);
     const Identifier *id = string->d()->identifier;
 
-    uint index = propertyTable.lookup(id);
-    if (index < size)
-        return index;
-
-    return UINT_MAX;
-}
-
-uint InternalClass::find(const Identifier *id)
-{
     uint index = propertyTable.lookup(id);
     if (index < size)
         return index;
@@ -386,7 +406,8 @@ InternalClass *InternalClass::sealed()
     if (m_sealed)
         return m_sealed;
 
-    m_sealed = engine->emptyClass;
+    m_sealed = engine->internalClasses[EngineBase::Class_Empty]->changeVTable(vtable);
+    m_sealed = m_sealed->changePrototype(prototype);
     for (uint i = 0; i < size; ++i) {
         PropertyAttributes attrs = propertyData.at(i);
         if (attrs.isEmpty())
@@ -415,7 +436,8 @@ InternalClass *InternalClass::frozen()
 
 InternalClass *InternalClass::propertiesFrozen() const
 {
-    InternalClass *frozen = engine->emptyClass;
+    InternalClass *frozen = engine->internalClasses[EngineBase::Class_Empty]->changeVTable(vtable);
+    frozen = frozen->changePrototype(prototype);
     for (uint i = 0; i < size; ++i) {
         PropertyAttributes attrs = propertyData.at(i);
         if (attrs.isEmpty())
@@ -429,11 +451,13 @@ InternalClass *InternalClass::propertiesFrozen() const
 
 void InternalClass::destroy()
 {
-    QList<InternalClass *> destroyStack;
-    destroyStack.append(this);
+    std::vector<InternalClass *> destroyStack;
+    destroyStack.reserve(64);
+    destroyStack.push_back(this);
 
-    while (!destroyStack.isEmpty()) {
-        InternalClass *next = destroyStack.takeLast();
+    while (!destroyStack.empty()) {
+        InternalClass *next = destroyStack.back();
+        destroyStack.pop_back();
         if (!next->engine)
             continue;
         next->engine = 0;
@@ -441,22 +465,38 @@ void InternalClass::destroy()
         next->nameMap.~SharedInternalClassData<Identifier *>();
         next->propertyData.~SharedInternalClassData<PropertyAttributes>();
         if (next->m_sealed)
-            destroyStack.append(next->m_sealed);
+            destroyStack.push_back(next->m_sealed);
         if (next->m_frozen)
-            destroyStack.append(next->m_frozen);
+            destroyStack.push_back(next->m_frozen);
 
         for (size_t i = 0; i < next->transitions.size(); ++i) {
             Q_ASSERT(next->transitions.at(i).lookup);
-            destroyStack.append(next->transitions.at(i).lookup);
+            destroyStack.push_back(next->transitions.at(i).lookup);
         }
 
         next->transitions.~vector<Transition>();
     }
 }
 
-void InternalClassPool::markObjects(ExecutionEngine *engine)
+void InternalClassPool::markObjects(MarkStack *markStack)
 {
-    Q_UNUSED(engine);
+    InternalClass *ic = markStack->engine->internalClasses[EngineBase::Class_Empty];
+    Q_ASSERT(!ic->prototype);
+
+    // only need to go two levels into the IC hierarchy, as prototype changes
+    // can only happen there
+    for (auto &t : ic->transitions) {
+        Q_ASSERT(t.lookup);
+        if (t.flags == InternalClassTransition::VTableChange) {
+            InternalClass *ic2 = t.lookup;
+            for (auto &t2 : ic2->transitions) {
+                if (t2.flags == InternalClassTransition::PrototypeChange)
+                    t2.lookup->prototype->mark(markStack);
+            }
+        } else if (t.flags == InternalClassTransition::PrototypeChange) {
+            t.lookup->prototype->mark(markStack);
+        }
+    }
 }
 
 QT_END_NAMESPACE

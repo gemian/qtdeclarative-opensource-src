@@ -45,37 +45,19 @@ using namespace QV4;
 
 DEFINE_MANAGED_VTABLE(MemberData);
 
-void MemberData::markObjects(Heap::Base *that, ExecutionEngine *e)
+Heap::MemberData *MemberData::allocate(ExecutionEngine *e, uint n, Heap::MemberData *old)
 {
-    Heap::MemberData *m = static_cast<Heap::MemberData *>(that);
-    for (uint i = 0; i < m->size; ++i)
-        m->data[i].mark(e);
-}
+    Q_ASSERT(!old || old->values.size < n);
+    Q_ASSERT(n);
 
-static Heap::MemberData *reallocateHelper(ExecutionEngine *e, Heap::MemberData *old, uint n)
-{
-    uint alloc = sizeof(Heap::MemberData) + (n)*sizeof(Value);
-    Scope scope(e);
-    Scoped<MemberData> newMemberData(scope, e->memoryManager->allocManaged<MemberData>(alloc));
+    size_t alloc = MemoryManager::align(sizeof(Heap::MemberData) + (n - 1)*sizeof(Value));
+    Heap::MemberData *m = e->memoryManager->allocManaged<MemberData>(alloc);
     if (old)
-        memcpy(newMemberData->d(), old, sizeof(Heap::MemberData) + old->size * sizeof(Value));
+        // no write barrier required here
+        memcpy(m, old, sizeof(Heap::MemberData) + (old->values.size - 1) * sizeof(Value));
     else
-        new (newMemberData->d()) Heap::MemberData;
-    newMemberData->d()->size = n;
-    return newMemberData->d();
-}
-
-Heap::MemberData *MemberData::allocate(ExecutionEngine *e, uint n)
-{
-    return reallocateHelper(e, 0, n);
-}
-
-Heap::MemberData *MemberData::reallocate(ExecutionEngine *e, Heap::MemberData *old, uint n)
-{
-    uint s = old ? old->size : 0;
-    if (n < s)
-        return old;
-
-    // n is multiplied by two to leave room for growth
-    return reallocateHelper(e, old, qMax((uint)4, 2*n));
+        m->init();
+    m->values.alloc = static_cast<uint>((alloc - sizeof(Heap::MemberData) + sizeof(Value))/sizeof(Value));
+    m->values.size = m->values.alloc;
+    return m;
 }

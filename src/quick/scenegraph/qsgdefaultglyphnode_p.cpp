@@ -50,6 +50,7 @@
 
 #include <QtQuick/qquickwindow.h>
 #include <QtQuick/private/qsgtexture_p.h>
+#include <QtQuick/private/qsgdefaultrendercontext_p.h>
 
 #include <private/qrawfont_p.h>
 #include <QtCore/qmath.h>
@@ -90,11 +91,11 @@ class QSGTextMaskShader : public QSGMaterialShader
 public:
     QSGTextMaskShader(QFontEngine::GlyphFormat glyphFormat);
 
-    virtual void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect);
-    virtual char const *const *attributeNames() const;
+    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
+    char const *const *attributeNames() const override;
 
 protected:
-    virtual void initialize();
+    void initialize() override;
 
     int m_matrix_id;
     int m_color_id;
@@ -180,7 +181,7 @@ public:
         setShaderSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/qt-project.org/scenegraph/shaders/8bittextmask.frag"));
     }
 
-    virtual void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect);
+    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
 };
 
 void QSG8BitTextMaskShader::updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect)
@@ -205,10 +206,10 @@ public:
         setShaderSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/qt-project.org/scenegraph/shaders/24bittextmask.frag"));
     }
 
-    virtual void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect);
-    virtual void initialize();
-    void activate();
-    void deactivate();
+    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
+    void initialize() override;
+    void activate() override;
+    void deactivate() override;
 
     bool useSRGB() const;
     uint m_useSRGB : 1;
@@ -239,7 +240,8 @@ bool QSG24BitTextMaskShader::useSRGB() const
     // m_useSRGB is true, but if some QOGLFBO was bound check it's texture format:
     QOpenGLContext *ctx = QOpenGLContext::currentContext();
     QOpenGLFramebufferObject *qfbo = QOpenGLContextPrivate::get(ctx)->qgl_current_fbo;
-    return !qfbo || qfbo->format().internalTextureFormat() == GL_SRGB8_ALPHA8_EXT;
+    bool fboInvalid = QOpenGLContextPrivate::get(ctx)->qgl_current_fbo_invalid;
+    return !qfbo || fboInvalid || qfbo->format().internalTextureFormat() == GL_SRGB8_ALPHA8_EXT;
 #else
     return m_useSRGB;
 #endif
@@ -324,10 +326,10 @@ public:
         setShaderSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/qt-project.org/scenegraph/shaders/styledtext.frag"));
     }
 
-    virtual void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect);
+    void updateState(const RenderState &state, QSGMaterial *newEffect, QSGMaterial *oldEffect) override;
 
 private:
-    virtual void initialize();
+    void initialize() override;
 
     int m_shift_id;
     int m_styleColor_id;
@@ -444,7 +446,7 @@ void QSGTextMaskMaterial::init(QFontEngine::GlyphFormat glyphFormat)
         if (!m_glyphCache || int(m_glyphCache->glyphFormat()) != glyphFormat) {
             m_glyphCache = new QOpenGLTextureGlyphCache(glyphFormat, glyphCacheTransform);
             fontEngine->setGlyphCache(ctx, m_glyphCache.data());
-            QSGRenderContext *sg = QSGRenderContext::from(ctx);
+            auto sg = QSGDefaultRenderContext::from(ctx);
             Q_ASSERT(sg);
             sg->registerFontengineForCleanup(fontEngine);
         }

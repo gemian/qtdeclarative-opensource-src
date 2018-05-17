@@ -46,7 +46,6 @@
 #include <private/qqmlcustomparser_p.h>
 #include <qqmlexpression.h>
 #include <private/qqmlbinding_p.h>
-#include <private/qqmlcompiler_p.h>
 #include <qqmlcontext.h>
 #include <private/qqmlproperty_p.h>
 #include <private/qqmlcontext_p.h>
@@ -102,7 +101,7 @@ QT_BEGIN_NAMESPACE
     \l {Item::}{parent} value, use ParentChange instead.
 
 
-    \section2 Resetting property values
+    \section2 Resetting Property Values
 
     The \c undefined value can be used to reset the property value for a state.
     In the following example, when \c myText changes to the \e widerText
@@ -112,7 +111,7 @@ QT_BEGIN_NAMESPACE
     \snippet qml/propertychanges.qml reset
 
 
-    \section2 Immediate property changes in transitions
+    \section2 Immediate Property Changes in Transitions
 
     When \l{Animation and Transitions in Qt Quick}{Transitions} are used to animate
     state changes, they animate properties from their values in the current
@@ -143,29 +142,29 @@ public:
     QQuickReplaceSignalHandler() {}
     ~QQuickReplaceSignalHandler() {}
 
-    virtual EventType type() const { return SignalHandler; }
+    EventType type() const override { return SignalHandler; }
 
     QQmlProperty property;
     QQmlBoundSignalExpressionPointer expression;
     QQmlBoundSignalExpressionPointer reverseExpression;
     QQmlBoundSignalExpressionPointer rewindExpression;
 
-    virtual void execute() {
+    void execute() override {
         QQmlPropertyPrivate::setSignalExpression(property, expression);
     }
 
-    virtual bool isReversable() { return true; }
-    virtual void reverse() {
+    bool isReversable() override { return true; }
+    void reverse() override {
         QQmlPropertyPrivate::setSignalExpression(property, reverseExpression);
     }
 
-    virtual void saveOriginals() {
+    void saveOriginals() override {
         saveCurrentValues();
         reverseExpression = rewindExpression;
     }
 
-    virtual bool needsCopy() { return true; }
-    virtual void copyOriginals(QQuickStateActionEvent *other)
+    bool needsCopy() override { return true; }
+    void copyOriginals(QQuickStateActionEvent *other) override
     {
         QQuickReplaceSignalHandler *rsh = static_cast<QQuickReplaceSignalHandler*>(other);
         saveCurrentValues();
@@ -174,14 +173,14 @@ public:
         reverseExpression = rsh->reverseExpression;
     }
 
-    virtual void rewind() {
+    void rewind() override {
         QQmlPropertyPrivate::setSignalExpression(property, rewindExpression);
     }
-    virtual void saveCurrentValues() {
+    void saveCurrentValues() override {
         rewindExpression = QQmlPropertyPrivate::signalExpression(property);
     }
 
-    virtual bool override(QQuickStateActionEvent*other) {
+    bool override(QQuickStateActionEvent *other) override {
         if (other == this)
             return true;
         if (other->type() != type())
@@ -202,7 +201,7 @@ public:
 
     QPointer<QObject> object;
     QList<const QV4::CompiledData::Binding *> bindings;
-    QQmlRefPointer<QQmlCompiledData> cdata;
+    QQmlRefPointer<QV4::CompiledData::CompilationUnit> compilationUnit;
 
     bool decoded : 1;
     bool restore : 1;
@@ -257,8 +256,8 @@ void QQuickPropertyChangesPrivate::decode()
     if (decoded)
         return;
 
-    foreach (const QV4::CompiledData::Binding *binding, bindings)
-        decodeBinding(QString(), cdata->compilationUnit->data, binding);
+    for (const QV4::CompiledData::Binding *binding : qAsConst(bindings))
+        decodeBinding(QString(), compilationUnit->data, binding);
 
     bindings.clear();
 
@@ -282,15 +281,19 @@ void QQuickPropertyChangesPrivate::decodeBinding(const QString &propertyPrefix, 
         return;
     }
 
-    QQmlProperty prop = property(propertyName);      //### better way to check for signal property?
-
-    if (prop.type() & QQmlProperty::SignalProperty) {
-        QQuickReplaceSignalHandler *handler = new QQuickReplaceSignalHandler;
-        handler->property = prop;
-        handler->expression.take(new QQmlBoundSignalExpression(object, QQmlPropertyPrivate::get(prop)->signalIndex(),
-                                                               QQmlContextData::get(qmlContext(q)), object, cdata->compilationUnit->runtimeFunctions[binding->value.compiledScriptIndex]));
-        signalReplacements << handler;
-        return;
+    if (propertyName.count() >= 3 &&
+        propertyName.at(0) == QLatin1Char('o') &&
+        propertyName.at(1) == QLatin1Char('n') &&
+        propertyName.at(2).isUpper()) {
+        QQmlProperty prop = property(propertyName);
+        if (prop.isSignalProperty()) {
+            QQuickReplaceSignalHandler *handler = new QQuickReplaceSignalHandler;
+            handler->property = prop;
+            handler->expression.take(new QQmlBoundSignalExpression(object, QQmlPropertyPrivate::get(prop)->signalIndex(),
+                                                                   QQmlContextData::get(qmlContext(q)), object, compilationUnit->runtimeFunctions.at(binding->value.compiledScriptIndex)));
+            signalReplacements << handler;
+            return;
+        }
     }
 
     if (binding->type == QV4::CompiledData::Binding::Type_Script) {
@@ -338,12 +341,12 @@ void QQuickPropertyChangesParser::verifyBindings(const QV4::CompiledData::Unit *
         verifyList(qmlUnit, props.at(ii));
 }
 
-void QQuickPropertyChangesParser::applyBindings(QObject *obj, QQmlCompiledData *cdata, const QList<const QV4::CompiledData::Binding *> &bindings)
+void QQuickPropertyChangesParser::applyBindings(QObject *obj, QV4::CompiledData::CompilationUnit *compilationUnit, const QList<const QV4::CompiledData::Binding *> &bindings)
 {
     QQuickPropertyChangesPrivate *p =
         static_cast<QQuickPropertyChangesPrivate *>(QObjectPrivate::get(obj));
     p->bindings = bindings;
-    p->cdata = cdata;
+    p->compilationUnit = compilationUnit;
     p->decoded = false;
 }
 
@@ -396,12 +399,15 @@ QQmlProperty
 QQuickPropertyChangesPrivate::property(const QString &property)
 {
     Q_Q(QQuickPropertyChanges);
-    QQmlProperty prop(object, property, qmlContext(q));
+    QQmlContextData *context = nullptr;
+    if (QQmlData *ddata = QQmlData::get(q))
+        context = ddata->outerContext;
+    QQmlProperty prop = QQmlPropertyPrivate::create(object, property, context);
     if (!prop.isValid()) {
-        qmlInfo(q) << QQuickPropertyChanges::tr("Cannot assign to non-existent property \"%1\"").arg(property);
+        qmlWarning(q) << QQuickPropertyChanges::tr("Cannot assign to non-existent property \"%1\"").arg(property);
         return QQmlProperty();
     } else if (!(prop.type() & QQmlProperty::SignalProperty) && !prop.isWritable()) {
-        qmlInfo(q) << QQuickPropertyChanges::tr("Cannot assign to read-only property \"%1\"").arg(property);
+        qmlWarning(q) << QQuickPropertyChanges::tr("Cannot assign to read-only property \"%1\"").arg(property);
         return QQmlProperty();
     }
     return prop;
@@ -416,9 +422,10 @@ QQuickPropertyChanges::ActionList QQuickPropertyChanges::actions()
     ActionList list;
 
     for (int ii = 0; ii < d->properties.count(); ++ii) {
+        QQmlProperty prop = d->property(d->properties.at(ii).first);
 
-        QQuickStateAction a(d->object, d->properties.at(ii).first,
-                 qmlContext(this), d->properties.at(ii).second);
+        QQuickStateAction a(d->object, prop, d->properties.at(ii).first,
+                            d->properties.at(ii).second);
 
         if (a.property.isValid()) {
             a.restore = restoreEntryValues();
@@ -427,7 +434,6 @@ QQuickPropertyChanges::ActionList QQuickPropertyChanges::actions()
     }
 
     for (int ii = 0; ii < d->signalReplacements.count(); ++ii) {
-
         QQuickReplaceSignalHandler *handler = d->signalReplacements.at(ii);
 
         if (handler->property.isValid()) {
@@ -456,12 +462,14 @@ QQuickPropertyChanges::ActionList QQuickPropertyChanges::actions()
             QQmlBinding *newBinding = 0;
             if (e.id != QQmlBinding::Invalid) {
                 QV4::Scope scope(QQmlEnginePrivate::getV4Engine(qmlEngine(this)));
-                QV4::ScopedValue function(scope, QV4::FunctionObject::createQmlFunction(context, object(), d->cdata->compilationUnit->runtimeFunctions[e.id]));
-                newBinding = new QQmlBinding(function, object(), context);
+                QV4::Scoped<QV4::QmlContext> qmlContext(scope, QV4::QmlContext::create(scope.engine->rootContext(), context, object()));
+                newBinding = QQmlBinding::create(&QQmlPropertyPrivate::get(prop)->core,
+                                                 d->compilationUnit->runtimeFunctions.at(e.id), object(), context, qmlContext);
             }
 //            QQmlBinding *newBinding = e.id != QQmlBinding::Invalid ? QQmlBinding::createBinding(e.id, object(), qmlContext(this)) : 0;
             if (!newBinding)
-                newBinding = new QQmlBinding(e.expression, object(), context, e.url.toString(), e.line, e.column);
+                newBinding = QQmlBinding::create(&QQmlPropertyPrivate::get(prop)->core,
+                                                 e.expression, object(), context, e.url.toString(), e.line);
 
             if (d->isExplicit) {
                 // in this case, we don't want to assign a binding, per se,
@@ -596,7 +604,7 @@ void QQuickPropertyChanges::changeValue(const QString &name, const QVariant &val
         state()->addEntryToRevertList(action);
         QQmlAbstractBinding *oldBinding = QQmlPropertyPrivate::binding(action.property);
         if (oldBinding)
-            oldBinding->setEnabled(false, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+            oldBinding->setEnabled(false, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
         d->property(name).write(value);
     }
 }
@@ -625,9 +633,12 @@ void QQuickPropertyChanges::changeExpression(const QString &name, const QString 
         if (entry.name == name) {
             entry.expression = expression;
             if (state() && state()->isStateActive()) {
-                QQmlBinding *newBinding = new QQmlBinding(expression, object(), qmlContext(this));
-                newBinding->setTarget(d->property(name));
-                QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+                auto prop = d->property(name);
+                QQmlBinding *newBinding = QQmlBinding::create(
+                            &QQmlPropertyPrivate::get(prop)->core, expression, object(),
+                            QQmlContextData::get(qmlContext(this)));
+                newBinding->setTarget(prop);
+                QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
             }
             return;
         }
@@ -640,13 +651,16 @@ void QQuickPropertyChanges::changeExpression(const QString &name, const QString 
         if (hadValue) {
             QQmlAbstractBinding *oldBinding = QQmlPropertyPrivate::binding(d->property(name));
             if (oldBinding) {
-                oldBinding->setEnabled(false, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+                oldBinding->setEnabled(false, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
                 state()->changeBindingInRevertList(object(), name, oldBinding);
             }
 
-            QQmlBinding *newBinding = new QQmlBinding(expression, object(), qmlContext(this));
-            newBinding->setTarget(d->property(name));
-            QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+            auto prop = d->property(name);
+            QQmlBinding *newBinding = QQmlBinding::create(
+                        &QQmlPropertyPrivate::get(prop)->core, expression, object(),
+                        QQmlContextData::get(qmlContext(this)));
+            newBinding->setTarget(prop);
+            QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
         } else {
             QQuickStateAction action;
             action.restore = restoreEntryValues();
@@ -655,7 +669,9 @@ void QQuickPropertyChanges::changeExpression(const QString &name, const QString 
             action.specifiedObject = object();
             action.specifiedProperty = name;
 
-            QQmlBinding *newBinding = new QQmlBinding(expression, object(), qmlContext(this));
+            QQmlBinding *newBinding = QQmlBinding::create(
+                        &QQmlPropertyPrivate::get(action.property)->core, expression,
+                        object(), QQmlContextData::get(qmlContext(this)));
             if (d->isExplicit) {
                 // don't assign the binding, merely evaluate the expression.
                 // XXX TODO: add a static QQmlJavaScriptExpression::evaluate(QString)
@@ -670,9 +686,9 @@ void QQuickPropertyChanges::changeExpression(const QString &name, const QString 
                 state()->addEntryToRevertList(action);
                 QQmlAbstractBinding *oldBinding = QQmlPropertyPrivate::binding(action.property);
                 if (oldBinding)
-                    oldBinding->setEnabled(false, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+                    oldBinding->setEnabled(false, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
 
-                QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyPrivate::DontRemoveBinding | QQmlPropertyPrivate::BypassInterceptor);
+                QQmlPropertyPrivate::setBinding(newBinding, QQmlPropertyPrivate::None, QQmlPropertyData::DontRemoveBinding | QQmlPropertyData::BypassInterceptor);
             }
         }
     }
@@ -776,3 +792,5 @@ void QQuickPropertyChanges::attachToState()
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickpropertychanges_p.cpp"

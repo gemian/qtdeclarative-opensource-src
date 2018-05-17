@@ -54,6 +54,7 @@
 #include <private/qtqmlglobal_p.h>
 #include <private/qqmllistcompositor_p.h>
 #include <private/qqmlobjectmodel_p.h>
+#include <private/qqmlincubator_p.h>
 
 #include <QtCore/qabstractitemmodel.h>
 #include <QtCore/qstringlist.h>
@@ -90,10 +91,10 @@ class Q_QML_PRIVATE_EXPORT QQmlDelegateModel : public QQmlInstanceModel, public 
 public:
     QQmlDelegateModel();
     QQmlDelegateModel(QQmlContext *, QObject *parent=0);
-    virtual ~QQmlDelegateModel();
+    ~QQmlDelegateModel();
 
-    void classBegin();
-    void componentComplete();
+    void classBegin() override;
+    void componentComplete() override;
 
     QVariant model() const;
     void setModel(const QVariant &);
@@ -107,15 +108,16 @@ public:
     Q_INVOKABLE QVariant modelIndex(int idx) const;
     Q_INVOKABLE QVariant parentModelIndex() const;
 
-    int count() const;
-    bool isValid() const { return delegate() != 0; }
-    QObject *object(int index, bool asynchronous=false);
-    ReleaseFlags release(QObject *object);
-    void cancel(int index);
-    virtual QString stringValue(int index, const QString &role);
-    virtual void setWatchedRoles(const QList<QByteArray> &roles);
+    int count() const override;
+    bool isValid() const override { return delegate() != 0; }
+    QObject *object(int index, QQmlIncubator::IncubationMode incubationMode = QQmlIncubator::AsynchronousIfNested) override;
+    ReleaseFlags release(QObject *object) override;
+    void cancel(int index) override;
+    QString stringValue(int index, const QString &role) override;
+    void setWatchedRoles(const QList<QByteArray> &roles) override;
+    QQmlIncubator::Status incubationStatus(int index) override;
 
-    int indexOf(QObject *object, QObject *objectContext) const;
+    int indexOf(QObject *object, QObject *objectContext) const override;
 
     QString filterGroup() const;
     void setFilterGroup(const QString &group);
@@ -126,7 +128,7 @@ public:
     QQmlListProperty<QQmlDelegateModelGroup> groups();
     QObject *parts();
 
-    bool event(QEvent *);
+    bool event(QEvent *) override;
 
     static QQmlDelegateModelAttached *qmlAttachedProperties(QObject *obj);
 

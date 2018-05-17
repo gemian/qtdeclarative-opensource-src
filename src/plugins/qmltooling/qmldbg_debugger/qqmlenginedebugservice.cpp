@@ -63,8 +63,12 @@ QT_BEGIN_NAMESPACE
 QQmlEngineDebugServiceImpl::QQmlEngineDebugServiceImpl(QObject *parent) :
     QQmlEngineDebugService(2, parent), m_watch(new QQmlWatcher(this)), m_statesDelegate(0)
 {
-    QObject::connect(m_watch, SIGNAL(propertyChanged(int,int,QMetaProperty,QVariant)),
-                     this, SLOT(propertyChanged(int,int,QMetaProperty,QVariant)));
+    connect(m_watch, &QQmlWatcher::propertyChanged,
+            this, &QQmlEngineDebugServiceImpl::propertyChanged);
+
+    // Move the message into the correct thread for processing
+    connect(this, &QQmlEngineDebugServiceImpl::scheduleMessage,
+            this, &QQmlEngineDebugServiceImpl::processMessage, Qt::QueuedConnection);
 }
 
 QQmlEngineDebugServiceImpl::~QQmlEngineDebugServiceImpl()
@@ -205,19 +209,32 @@ QVariant QQmlEngineDebugServiceImpl::valueContents(QVariant value) const
     }
 
     if (QQmlValueTypeFactory::isValueType(userType)) {
+        switch (userType) {
+        case QMetaType::QRect:
+        case QMetaType::QRectF:
+        case QMetaType::QPoint:
+        case QMetaType::QPointF:
+        case QMetaType::QSize:
+        case QMetaType::QSizeF:
+        case QMetaType::QFont:
+            // Don't call the toString() method on those. The stream operators are better.
+            return value;
+        default:
+            break;
+        }
+
         const QMetaObject *mo = QQmlValueTypeFactory::metaObjectForMetaType(userType);
         if (mo) {
-            int toStringIndex = mo->indexOfMethod("toString");
+            int toStringIndex = mo->indexOfMethod("toString()");
             if (toStringIndex != -1) {
                 QMetaMethod mm = mo->method(toStringIndex);
-                QMetaType info(userType);
                 QString s;
-                if (info.flags() & QMetaType::IsGadget
-                        && mm.invokeOnGadget(value.data(), Q_RETURN_ARG(QString, s)))
+                if (mm.invokeOnGadget(value.data(), Q_RETURN_ARG(QString, s)))
                     return s;
             }
         }
 
+        // We expect all QML value types to either have a toString() method or stream operators
         return value;
     }
 
@@ -285,10 +302,12 @@ void QQmlEngineDebugServiceImpl::buildObjectDump(QDataStream &message,
                 prop.value = expr->expression();
                 QObject *scope = expr->scopeObject();
                 if (scope) {
-                    QString methodName = QString::fromLatin1(QMetaObjectPrivate::signal(scope->metaObject(), signalHandler->signalIndex()).name());
-                    if (!methodName.isEmpty()) {
-                        prop.name = QLatin1String("on") + methodName[0].toUpper()
-                                + methodName.mid(1);
+                    const QByteArray methodName = QMetaObjectPrivate::signal(scope->metaObject(),
+                                                                             signalHandler->signalIndex()).name();
+                    const QLatin1String methodNameStr(methodName);
+                    if (methodNameStr.size() != 0) {
+                        prop.name = QLatin1String("on") + QChar(methodNameStr.at(0)).toUpper()
+                                + methodNameStr.mid(1);
                     }
                 }
             }
@@ -331,6 +350,9 @@ void QQmlEngineDebugServiceImpl::buildObjectList(QDataStream &message,
                                              QQmlContext *ctxt,
                                              const QList<QPointer<QObject> > &instances)
 {
+    if (!ctxt->isValid())
+        return;
+
     QQmlContextData *p = QQmlContextData::get(ctxt);
 
     QString ctxtName = ctxt->objectName();
@@ -393,34 +415,20 @@ QQmlEngineDebugServiceImpl::objectData(QObject *object)
     }
 
     QQmlContext *context = qmlContext(object);
-    if (context) {
-        QQmlContextData *cdata = QQmlContextData::get(context);
-        if (cdata)
-            rv.idString = cdata->findObjectId(object);
-    }
+    if (context && context->isValid())
+        rv.idString = QQmlContextData::get(context)->findObjectId(object);
 
     rv.objectName = object->objectName();
     rv.objectId = QQmlDebugService::idForObject(object);
     rv.contextId = QQmlDebugService::idForObject(qmlContext(object));
     rv.parentId = QQmlDebugService::idForObject(object->parent());
-    QQmlType *type = QQmlMetaType::qmlType(object->metaObject());
-    if (type) {
-        QString typeName = type->qmlTypeName();
-        int lastSlash = typeName.lastIndexOf(QLatin1Char('/'));
-        rv.objectType = lastSlash < 0 ? typeName : typeName.mid(lastSlash+1);
-    } else {
-        rv.objectType = QString::fromUtf8(object->metaObject()->className());
-        int marker = rv.objectType.indexOf(QLatin1String("_QMLTYPE_"));
-        if (marker != -1)
-            rv.objectType = rv.objectType.left(marker);
-    }
-
+    rv.objectType = QQmlMetaType::prettyTypeName(object);
     return rv;
 }
 
 void QQmlEngineDebugServiceImpl::messageReceived(const QByteArray &message)
 {
-    QMetaObject::invokeMethod(this, "processMessage", Qt::QueuedConnection, Q_ARG(QByteArray, message));
+    emit scheduleMessage(message);
 }
 
 /*!
@@ -516,12 +524,12 @@ void QQmlEngineDebugServiceImpl::processMessage(const QByteArray &message)
 
         ds >> file >> lineNumber >> columnNumber >> recurse >> dumpProperties;
 
-        QList<QObject*> objects = objectForLocationInfo(file, lineNumber, columnNumber);
+        const QList<QObject*> objects = objectForLocationInfo(file, lineNumber, columnNumber);
 
         rs << QByteArray("FETCH_OBJECTS_FOR_LOCATION_R") << queryId
            << objects.count();
 
-        foreach (QObject *object, objects) {
+        for (QObject *object : objects) {
             if (recurse)
                 prepareDeferredObjects(object);
             buildObjectDump(rs, object, recurse, dumpProperties);
@@ -569,14 +577,14 @@ void QQmlEngineDebugServiceImpl::processMessage(const QByteArray &message)
 
         QObject *object = QQmlDebugService::objectForId(objectId);
         QQmlContext *context = qmlContext(object);
-        if (!context) {
+        if (!context || !context->isValid()) {
             QQmlEngine *engine = qobject_cast<QQmlEngine *>(
                         QQmlDebugService::objectForId(engineId));
             if (engine && m_engines.contains(engine))
                 context = engine->rootContext();
         }
         QVariant result;
-        if (context) {
+        if (context && context->isValid()) {
             QQmlExpression exprObj(context, object, expr);
             bool undefined = false;
             QVariant value = exprObj.evaluate(&undefined);
@@ -637,7 +645,7 @@ bool QQmlEngineDebugServiceImpl::setBinding(int objectId,
     QObject *object = objectForId(objectId);
     QQmlContext *context = qmlContext(object);
 
-    if (object && context) {
+    if (object && context && context->isValid()) {
         QQmlProperty property(object, propertyName, context);
         if (property.isValid()) {
 
@@ -656,7 +664,7 @@ bool QQmlEngineDebugServiceImpl::setBinding(int objectId,
                                                                                              filename, line, column);
                     QQmlPropertyPrivate::takeSignalExpression(property, qmlExpression);
                 } else if (property.isProperty()) {
-                    QQmlBinding *binding = new QQmlBinding(expression.toString(), object, QQmlContextData::get(context), filename, line, column);
+                    QQmlBinding *binding = QQmlBinding::create(&QQmlPropertyPrivate::get(property)->core, expression.toString(), object, QQmlContextData::get(context), filename, line);
                     binding->setTarget(property);
                     QQmlPropertyPrivate::setBinding(binding);
                     binding->update();
@@ -682,7 +690,7 @@ bool QQmlEngineDebugServiceImpl::resetBinding(int objectId, const QString &prope
     QObject *object = objectForId(objectId);
     QQmlContext *context = qmlContext(object);
 
-    if (object && context) {
+    if (object && context && context->isValid()) {
         QStringRef parentPropertyRef(&propertyName);
         const int idx = parentPropertyRef.indexOf(QLatin1Char('.'));
         if (idx != -1)
@@ -700,8 +708,9 @@ bool QQmlEngineDebugServiceImpl::resetBinding(int objectId, const QString &prope
                 property.reset();
             } else {
                 // overwrite with default value
-                if (QQmlType *objType = QQmlMetaType::qmlType(object->metaObject())) {
-                    if (QObject *emptyObject = objType->create()) {
+                QQmlType objType = QQmlMetaType::qmlType(object->metaObject());
+                if (objType.isValid()) {
+                    if (QObject *emptyObject = objType.create()) {
                         if (emptyObject->property(parentProperty).isValid()) {
                             QVariant defaultValue = QQmlProperty(emptyObject, propertyName).read();
                             if (defaultValue.isValid()) {
@@ -736,11 +745,9 @@ bool QQmlEngineDebugServiceImpl::setMethodBody(int objectId, const QString &meth
 {
     QObject *object = objectForId(objectId);
     QQmlContext *context = qmlContext(object);
-    if (!object || !context || !context->engine())
+    if (!object || !context || !context->isValid())
         return false;
     QQmlContextData *contextData = QQmlContextData::get(context);
-    if (!contextData)
-        return false;
 
     QQmlPropertyData dummy;
     QQmlPropertyData *prop =
@@ -749,7 +756,7 @@ bool QQmlEngineDebugServiceImpl::setMethodBody(int objectId, const QString &meth
     if (!prop || !prop->isVMEFunction())
         return false;
 
-    QMetaMethod metaMethod = object->metaObject()->method(prop->coreIndex);
+    QMetaMethod metaMethod = object->metaObject()->method(prop->coreIndex());
     QList<QByteArray> paramNames = metaMethod.parameterNames();
 
     QString paramStr;
@@ -758,19 +765,22 @@ bool QQmlEngineDebugServiceImpl::setMethodBody(int objectId, const QString &meth
         paramStr.append(QString::fromUtf8(paramNames.at(ii)));
     }
 
-    QString jsfunction = QLatin1String("(function ") + method + QLatin1Char('(') + paramStr +
-            QLatin1String(") {");
-    jsfunction += body;
-    jsfunction += QLatin1String("\n})");
+    const QString jsfunction = QLatin1String("(function ") + method + QLatin1Char('(') + paramStr +
+            QLatin1String(") {") + body + QLatin1String("\n})");
 
     QQmlVMEMetaObject *vmeMetaObject = QQmlVMEMetaObject::get(object);
     Q_ASSERT(vmeMetaObject); // the fact we found the property above should guarentee this
 
-    int lineNumber = vmeMetaObject->vmeMethodLineNumber(prop->coreIndex);
     QV4::ExecutionEngine *v4 = QV8Engine::getV4(qmlEngine(object)->handle());
     QV4::Scope scope(v4);
+
+    int lineNumber = 0;
+    QV4::ScopedFunctionObject oldMethod(scope, vmeMetaObject->vmeMethod(prop->coreIndex()));
+    if (oldMethod && oldMethod->d()->function) {
+        lineNumber = oldMethod->d()->function->compiledFunction->location.line;
+    }
     QV4::ScopedValue v(scope, QQmlJavaScriptExpression::evalFunction(contextData, object, jsfunction, contextData->urlString(), lineNumber));
-    vmeMetaObject->setVmeMethod(prop->coreIndex, v);
+    vmeMetaObject->setVmeMethod(prop->coreIndex(), v);
     return true;
 }
 
@@ -821,3 +831,5 @@ void QQmlEngineDebugServiceImpl::setStatesDelegate(QQmlDebugStatesDelegate *dele
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qqmlenginedebugservice.cpp"

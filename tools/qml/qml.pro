@@ -6,12 +6,14 @@ HEADERS += conf.h
 SOURCES += main.cpp
 RESOURCES += qml.qrc
 
+QMAKE_TARGET_DESCRIPTION = QML Runtime
+
 mac {
     OTHER_FILES += Info.plist
     QMAKE_INFO_PLIST = Info.plist
     ICON = qml.icns
 }
 
-DEFINES += QT_QML_DEBUG_NO_WARNING
+!contains(QT_CONFIG, no-qml-debug): DEFINES += QT_QML_DEBUG_NO_WARNING
 
 load(qt_tool)

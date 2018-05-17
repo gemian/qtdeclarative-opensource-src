@@ -59,7 +59,7 @@
 QT_BEGIN_NAMESPACE
 
 class QNetworkReply;
-class QQuickImageBasePrivate : public QQuickImplicitSizeItemPrivate
+class Q_QUICK_PRIVATE_EXPORT QQuickImageBasePrivate : public QQuickImplicitSizeItemPrivate
 {
     Q_DECLARE_PUBLIC(QQuickImageBase)
 
@@ -68,13 +68,14 @@ public:
       : status(QQuickImageBase::Null),
         progress(0.0),
         devicePixelRatio(1.0),
-        autoTransform(UsePluginDefault),
         async(false),
         cache(true),
         mirror(false),
         oldAutoTransform(false)
     {
     }
+
+    virtual bool updateDevicePixelRatio(qreal targetDevicePixelRatio);
 
     QQuickPixmap pix;
     QQuickImageBase::Status status;
@@ -83,7 +84,7 @@ public:
     QSize sourcesize;
     QSize oldSourceSize;
     qreal devicePixelRatio;
-    AutoTransform autoTransform;
+    QQuickImageProviderOptions providerOptions;
     bool async : 1;
     bool cache : 1;
     bool mirror: 1;

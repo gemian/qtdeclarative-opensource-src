@@ -52,6 +52,8 @@
 
 QT_BEGIN_NAMESPACE
 
+Q_DECLARE_LOGGING_CATEGORY(lcTransient)
+
 class QQuickWindowQmlImplPrivate : public QQuickWindowPrivate
 {
 public:
@@ -73,6 +75,7 @@ QQuickWindowQmlImpl::QQuickWindowQmlImpl(QWindow *parent)
 {
     connect(this, &QWindow::visibleChanged, this, &QQuickWindowQmlImpl::visibleChanged);
     connect(this, &QWindow::visibilityChanged, this, &QQuickWindowQmlImpl::visibilityChanged);
+    connect(this, &QWindow::screenChanged, this, &QQuickWindowQmlImpl::screenChanged);
 }
 
 void QQuickWindowQmlImpl::setVisible(bool visible)
@@ -100,6 +103,9 @@ void QQuickWindowQmlImpl::classBegin()
 {
     Q_D(QQuickWindowQmlImpl);
     QQmlEngine* e = qmlEngine(this);
+
+    QQmlEngine::setContextForObject(contentItem(), e->rootContext());
+
     //Give QQuickView behavior when created from QML with QQmlApplicationEngine
     if (QCoreApplication::instance()->property("__qml_using_qqmlapplicationengine") == QVariant(true)) {
         if (e && !e->incubationController())
@@ -117,7 +123,13 @@ void QQuickWindowQmlImpl::componentComplete()
 {
     Q_D(QQuickWindowQmlImpl);
     d->complete = true;
-    if (transientParent() && !transientParent()->isVisible()) {
+    QQuickItem *itemParent = qmlobject_cast<QQuickItem *>(QObject::parent());
+    if (itemParent && !itemParent->window()) {
+        qCDebug(lcTransient) << "window" << title() << "has invisible Item parent" << itemParent << "transientParent"
+                             << transientParent() << "declared visibility" << d->visibility << "; delaying show";
+        connect(itemParent, &QQuickItem::windowChanged, this,
+                &QQuickWindowQmlImpl::setWindowVisibility, Qt::QueuedConnection);
+    } else if (transientParent() && !transientParent()->isVisible()) {
         connect(transientParent(), &QQuickWindow::visibleChanged, this,
                 &QQuickWindowQmlImpl::setWindowVisibility, Qt::QueuedConnection);
     } else {
@@ -131,9 +143,10 @@ void QQuickWindowQmlImpl::setWindowVisibility()
     if (transientParent() && !transientParent()->isVisible())
         return;
 
-    if (sender()) {
-        disconnect(transientParent(), &QWindow::visibleChanged, this,
-                   &QQuickWindowQmlImpl::setWindowVisibility);
+    if (QQuickItem *senderItem = qmlobject_cast<QQuickItem *>(sender())) {
+        disconnect(senderItem, &QQuickItem::windowChanged, this, &QQuickWindowQmlImpl::setWindowVisibility);
+    } else if (sender()) {
+        disconnect(transientParent(), &QWindow::visibleChanged, this, &QQuickWindowQmlImpl::setWindowVisibility);
     }
 
     // We have deferred window creation until we have the full picture of what
@@ -170,6 +183,17 @@ void QQuickWindowQmlImpl::setWindowVisibility()
     }
 }
 
+QObject *QQuickWindowQmlImpl::screen() const
+{
+    return new QQuickScreenInfo(const_cast<QQuickWindowQmlImpl *>(this), QWindow::screen());
+}
+
+void QQuickWindowQmlImpl::setScreen(QObject *screen)
+{
+    QQuickScreenInfo *screenWrapper = qobject_cast<QQuickScreenInfo *>(screen);
+    QWindow::setScreen(screenWrapper ? screenWrapper->wrappedScreen() : nullptr);
+}
+
 void QQuickWindowModule::defineModule()
 {
     const char uri[] = "QtQuick.Window";
@@ -181,9 +205,13 @@ void QQuickWindowModule::defineModule()
     qmlRegisterRevision<QQuickWindow,2>(uri, 2, 2);
     qmlRegisterType<QQuickWindowQmlImpl>(uri, 2, 1, "Window");
     qmlRegisterType<QQuickWindowQmlImpl,1>(uri, 2, 2, "Window");
+    qmlRegisterType<QQuickWindowQmlImpl,2>(uri, 2, 3, "Window");
     qmlRegisterUncreatableType<QQuickScreen>(uri, 2, 0, "Screen", QStringLiteral("Screen can only be used via the attached property."));
+    qmlRegisterUncreatableType<QQuickScreen,1>(uri, 2, 3, "Screen", QStringLiteral("Screen can only be used via the attached property."));
+    qmlRegisterUncreatableType<QQuickScreenInfo,2>(uri, 2, 3, "ScreenInfo", QStringLiteral("ScreenInfo can only be used via the attached property."));
+    qmlRegisterUncreatableType<QQuickScreenInfo,10>(uri, 2, 10, "ScreenInfo", QStringLiteral("ScreenInfo can only be used via the attached property."));
 }
 
 QT_END_NAMESPACE
 
-QML_DECLARE_TYPEINFO(QQuickWindowQmlImpl, QML_HAS_ATTACHED_PROPERTIES)
+#include "moc_qquickwindowmodule_p.cpp"

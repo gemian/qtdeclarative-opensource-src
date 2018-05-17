@@ -59,26 +59,35 @@ namespace QV4 {
 
 namespace Heap {
 
-struct ArgumentsGetterFunction : FunctionObject {
-    inline ArgumentsGetterFunction(QV4::ExecutionContext *scope, uint index);
-    uint index;
+#define ArgumentsGetterFunctionMembers(class, Member) \
+    Member(class, NoMark, uint, index)
+
+DECLARE_HEAP_OBJECT(ArgumentsGetterFunction, FunctionObject) {
+    DECLARE_MARK_TABLE(ArgumentsGetterFunction);
+    inline void init(QV4::ExecutionContext *scope, uint index);
 };
 
-struct ArgumentsSetterFunction : FunctionObject {
-    inline ArgumentsSetterFunction(QV4::ExecutionContext *scope, uint index);
-    uint index;
+#define ArgumentsSetterFunctionMembers(class, Member) \
+    Member(class, NoMark, uint, index)
+
+DECLARE_HEAP_OBJECT(ArgumentsSetterFunction, FunctionObject) {
+    DECLARE_MARK_TABLE(ArgumentsSetterFunction);
+    inline void init(QV4::ExecutionContext *scope, uint index);
 };
 
-struct ArgumentsObject : Object {
+#define ArgumentsObjectMembers(class, Member) \
+    Member(class, Pointer, CallContext *, context) \
+    Member(class, Pointer, MemberData *, mappedArguments) \
+    Member(class, NoMark, bool, fullyCreated)
+
+DECLARE_HEAP_OBJECT(ArgumentsObject, Object) {
+    DECLARE_MARK_TABLE(ArgumentsObject);
     enum {
         LengthPropertyIndex = 0,
         CalleePropertyIndex = 1,
         CallerPropertyIndex = 3
     };
-    ArgumentsObject(QV4::CallContext *context);
-    Pointer<CallContext> context;
-    bool fullyCreated;
-    Pointer<MemberData> mappedArguments;
+    void init(QV4::CallContext *context);
 };
 
 }
@@ -88,14 +97,14 @@ struct ArgumentsGetterFunction: FunctionObject
     V4_OBJECT2(ArgumentsGetterFunction, FunctionObject)
 
     uint index() const { return d()->index; }
-    static ReturnedValue call(const Managed *that, CallData *d);
+    static void call(const Managed *that, Scope &scope, CallData *d);
 };
 
-inline
-Heap::ArgumentsGetterFunction::ArgumentsGetterFunction(QV4::ExecutionContext *scope, uint index)
-    : Heap::FunctionObject(scope)
-    , index(index)
+inline void
+Heap::ArgumentsGetterFunction::init(QV4::ExecutionContext *scope, uint index)
 {
+    Heap::FunctionObject::init(scope);
+    this->index = index;
 }
 
 struct ArgumentsSetterFunction: FunctionObject
@@ -103,14 +112,14 @@ struct ArgumentsSetterFunction: FunctionObject
     V4_OBJECT2(ArgumentsSetterFunction, FunctionObject)
 
     uint index() const { return d()->index; }
-    static ReturnedValue call(const Managed *that, CallData *callData);
+    static void call(const Managed *that, Scope &scope, CallData *callData);
 };
 
-inline
-Heap::ArgumentsSetterFunction::ArgumentsSetterFunction(QV4::ExecutionContext *scope, uint index)
-    : Heap::FunctionObject(scope)
-    , index(index)
+inline void
+Heap::ArgumentsSetterFunction::init(QV4::ExecutionContext *scope, uint index)
 {
+    Heap::FunctionObject::init(scope);
+    this->index = index;
 }
 
 
@@ -128,12 +137,13 @@ struct ArgumentsObject: Object {
 
     bool defineOwnProperty(ExecutionEngine *engine, uint index, const Property *desc, PropertyAttributes attrs);
     static ReturnedValue getIndexed(const Managed *m, uint index, bool *hasProperty);
-    static void putIndexed(Managed *m, uint index, const Value &value);
+    static bool putIndexed(Managed *m, uint index, const Value &value);
     static bool deleteIndexedProperty(Managed *m, uint index);
     static PropertyAttributes queryIndexed(const Managed *m, uint index);
-    static void markObjects(Heap::Base *that, ExecutionEngine *e);
+    static uint getLength(const Managed *m);
 
     void fullyCreate();
+
 };
 
 }

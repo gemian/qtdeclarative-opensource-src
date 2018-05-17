@@ -34,8 +34,12 @@
 #include <QtQuick/qquickitem.h>
 #include "../../shared/util.h"
 #include <QtGui/QWindow>
+#include <QtGui/QImage>
 #include <QtCore/QDebug>
 #include <QtQml/qqmlengine.h>
+
+#include <QtWidgets/QBoxLayout>
+#include <QtWidgets/QLabel>
 
 #include <QtQuickWidgets/QQuickWidget>
 
@@ -50,12 +54,19 @@ private slots:
     void reparentAfterShow();
     void changeGeometry();
     void resizemodeitem();
+    void layoutSizeChange();
     void errors();
     void engine();
     void readback();
     void renderingSignals();
+    void grab();
     void grabBeforeShow();
+    void reparentToNewWindow();
     void nullEngine();
+    void keyEvents();
+    void shortcuts();
+    void enterLeave();
+    void mouseEventWindowPos();
 };
 
 
@@ -220,6 +231,39 @@ void tst_qquickwidget::resizemodeitem()
     QCOMPARE(view->initialSize(), QSize(200, 200)); // initial object size
 }
 
+void tst_qquickwidget::layoutSizeChange()
+{
+    QWidget window;
+    window.resize(400, 400);
+
+    QVBoxLayout *layout = new QVBoxLayout(&window);
+    layout->setContentsMargins(0,0,0,0);
+    layout->setSpacing(0);
+    QScopedPointer<QQuickWidget> view(new QQuickWidget);
+    layout->addWidget(view.data());
+    QLabel *label = new QLabel("Label");
+    layout->addWidget(label);
+    layout->addStretch(1);
+
+
+    view->resize(300,300);
+    view->setResizeMode(QQuickWidget::SizeViewToRootObject);
+    QCOMPARE(QSize(0,0), view->initialSize());
+    view->setSource(testFileUrl("rectangle.qml"));
+    QQuickItem* item = qobject_cast<QQuickItem*>(view->rootObject());
+    QVERIFY(item);
+    QCOMPARE(item->height(), 200.0);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window, 5000));
+    QTRY_COMPARE(view->height(), 200);
+    QTRY_COMPARE(label->y(), 200);
+
+    item->setSize(QSizeF(100,100));
+    QCOMPARE(item->height(), 100.0);
+    QTRY_COMPARE(view->height(), 100);
+    QTRY_COMPARE(label->y(), 100);
+}
+
 void tst_qquickwidget::errors()
 {
     QQuickWidget *view = new QQuickWidget;
@@ -294,12 +338,42 @@ void tst_qquickwidget::renderingSignals()
     QTRY_VERIFY(afterRenderingSpy.size() > 0);
 }
 
+void tst_qquickwidget::grab()
+{
+    QQuickWidget view;
+    view.setSource(testFileUrl("rectangle.qml"));
+    QPixmap pixmap = view.grab();
+    QRgb pixel = pixmap.toImage().pixel(5, 5);
+    QCOMPARE(pixel, qRgb(255, 0, 0));
+}
+
 // QTBUG-49929, verify that Qt Designer grabbing the contents before drag
 // does not crash due to missing GL contexts or similar.
 void tst_qquickwidget::grabBeforeShow()
 {
     QQuickWidget widget;
     QVERIFY(!widget.grab().isNull());
+}
+
+void tst_qquickwidget::reparentToNewWindow()
+{
+    QWidget window1;
+    QWidget window2;
+
+    QQuickWidget *qqw = new QQuickWidget(&window1);
+    qqw->setSource(testFileUrl("rectangle.qml"));
+    window1.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window1, 5000));
+    window2.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window2, 5000));
+
+    QSignalSpy afterRenderingSpy(qqw->quickWindow(), &QQuickWindow::afterRendering);
+    qqw->setParent(&window2);
+    qqw->show();
+    QTRY_VERIFY(afterRenderingSpy.size() > 0);
+
+    QImage img = qqw->grabFramebuffer();
+    QCOMPARE(img.pixel(5, 5), qRgb(255, 0, 0));
 }
 
 void tst_qquickwidget::nullEngine()
@@ -312,6 +386,117 @@ void tst_qquickwidget::nullEngine()
     // A QML engine should be created lazily.
     QVERIFY(widget.rootContext());
     QVERIFY(widget.engine());
+}
+
+class KeyHandlingWidget : public QQuickWidget
+{
+public:
+    void keyPressEvent(QKeyEvent *e) override {
+        if (e->key() == Qt::Key_A)
+            ok = true;
+    }
+
+    bool ok = false;
+};
+
+void tst_qquickwidget::keyEvents()
+{
+    // A QQuickWidget should behave like a normal widget when it comes to event handling.
+    // Verify that key events actually reach the widget. (QTBUG-45757)
+    KeyHandlingWidget widget;
+    widget.setSource(testFileUrl("rectangle.qml"));
+    widget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(widget.window(), 5000));
+
+    // Note: send the event to the QWindow, not the QWidget, in order
+    // to simulate the full event processing chain.
+    QTest::keyClick(widget.window()->windowHandle(), Qt::Key_A);
+
+    QTRY_VERIFY(widget.ok);
+}
+
+class ShortcutEventFilter : public QObject
+{
+public:
+    bool eventFilter(QObject *obj, QEvent *e) override {
+        if (e->type() == QEvent::ShortcutOverride)
+            shortcutOk = true;
+
+        return QObject::eventFilter(obj, e);
+    }
+
+    bool shortcutOk = false;
+};
+
+void tst_qquickwidget::shortcuts()
+{
+    // Verify that ShortcutOverride events do not get lost. (QTBUG-60988)
+    KeyHandlingWidget widget;
+    widget.setSource(testFileUrl("rectangle.qml"));
+    widget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(widget.window(), 5000));
+
+    // Send to the widget, verify that the QQuickWindow sees it.
+
+    ShortcutEventFilter filter;
+    widget.quickWindow()->installEventFilter(&filter);
+
+    QKeyEvent e(QEvent::ShortcutOverride, Qt::Key_A, Qt::ControlModifier);
+    QCoreApplication::sendEvent(&widget, &e);
+
+    QTRY_VERIFY(filter.shortcutOk);
+}
+
+void tst_qquickwidget::enterLeave()
+{
+    QQuickWidget view;
+    view.setSource(testFileUrl("enterleave.qml"));
+
+    // Ensure it is not inside the window first
+    QCursor::setPos(QPoint(50, 50));
+    QTRY_VERIFY(QCursor::pos() == QPoint(50, 50));
+
+    view.move(100, 100);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view, 5000));
+    QQuickItem *rootItem = view.rootObject();
+    QVERIFY(rootItem);
+
+    QTRY_VERIFY(!rootItem->property("hasMouse").toBool());
+    // Check the enter
+    QCursor::setPos(view.pos() + QPoint(50, 50));
+    QTRY_VERIFY(rootItem->property("hasMouse").toBool());
+    // Now check the leave
+    QCursor::setPos(view.pos() - QPoint(50, 50));
+    QTRY_VERIFY(!rootItem->property("hasMouse").toBool());
+}
+
+void tst_qquickwidget::mouseEventWindowPos()
+{
+    QWidget widget;
+    widget.resize(100, 100);
+    QQuickWidget *quick = new QQuickWidget(&widget);
+    quick->setSource(testFileUrl("mouse.qml"));
+    quick->move(50, 50);
+    widget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&widget, 5000));
+    QQuickItem *rootItem = quick->rootObject();
+    QVERIFY(rootItem);
+
+    QVERIFY(!rootItem->property("wasClicked").toBool());
+    QVERIFY(!rootItem->property("wasDoubleClicked").toBool());
+    QVERIFY(!rootItem->property("wasMoved").toBool());
+
+    QWindow *window = widget.windowHandle();
+    QVERIFY(window);
+
+    QTest::mouseMove(window, QPoint(60, 60));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), QPoint(60, 60));
+    QTRY_VERIFY(rootItem->property("wasClicked").toBool());
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::KeyboardModifiers(), QPoint(60, 60));
+    QTRY_VERIFY(rootItem->property("wasDoubleClicked").toBool());
+    QTest::mouseMove(window, QPoint(70, 70));
+    QTRY_VERIFY(rootItem->property("wasMoved").toBool());
 }
 
 QTEST_MAIN(tst_qquickwidget)

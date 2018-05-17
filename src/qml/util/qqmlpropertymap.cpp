@@ -54,10 +54,10 @@ public:
     QQmlPropertyMapMetaObject(QQmlPropertyMap *obj, QQmlPropertyMapPrivate *objPriv, const QMetaObject *staticMetaObject);
 
 protected:
-    virtual QVariant propertyWriteValue(int, const QVariant &);
-    virtual void propertyWritten(int index);
-    virtual void propertyCreated(int, QMetaPropertyBuilder &);
-    virtual int createProperty(const char *, const char *);
+    QVariant propertyWriteValue(int, const QVariant &) override;
+    void propertyWritten(int index) override;
+    void propertyCreated(int, QMetaPropertyBuilder &) override;
+    int createProperty(const char *, const char *) override;
 
     const QString &propertyName(int index);
 
@@ -186,9 +186,8 @@ int QQmlPropertyMapMetaObject::createProperty(const char *name, const char *valu
     Constructs a bindable map with parent object \a parent.
 */
 QQmlPropertyMap::QQmlPropertyMap(QObject *parent)
-: QObject(*allocatePrivate(), parent)
+: QQmlPropertyMap(&staticMetaObject, parent)
 {
-    init(metaObject());
 }
 
 /*!
@@ -339,16 +338,11 @@ QVariant QQmlPropertyMap::updateValue(const QString &key, const QVariant &input)
 }
 
 /*! \internal */
-void QQmlPropertyMap::init(const QMetaObject *staticMetaObject)
+QQmlPropertyMap::QQmlPropertyMap(const QMetaObject *staticMetaObject, QObject *parent)
+    : QObject(*(new QQmlPropertyMapPrivate), parent)
 {
     Q_D(QQmlPropertyMap);
     d->mo = new QQmlPropertyMapMetaObject(this, d, staticMetaObject);
-}
-
-/*! \internal */
-QObjectPrivate *QQmlPropertyMap::allocatePrivate()
-{
-    return new QQmlPropertyMapPrivate;
 }
 
 /*!

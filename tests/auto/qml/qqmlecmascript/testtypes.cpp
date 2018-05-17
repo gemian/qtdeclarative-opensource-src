@@ -245,9 +245,16 @@ public:
     MyWorkerObject *o;
 };
 
+MyWorkerObject::~MyWorkerObject()
+{
+    if (m_thread)
+        m_thread->wait();
+}
+
 void MyWorkerObject::doIt()
 {
-    new MyWorkerObjectThread(this);
+    Q_ASSERT(!m_thread);
+    m_thread = new MyWorkerObjectThread(this);
 }
 
 class MyDateClass : public QObject
@@ -283,6 +290,15 @@ public:
     {
         return stringList;
     }
+    Q_INVOKABLE QVector<QString> stringsVector(const QStringList& stringList) const
+    {
+        return stringList.toVector();
+    }
+    Q_INVOKABLE
+    std::vector<QString> stringsStdVector(const QStringList& stringList) const
+    {
+        return std::vector<QString>(stringList.begin(), stringList.end());
+    }
     Q_INVOKABLE QList<int> integers(QList<int> v) const
     {
         return v;
@@ -299,11 +315,26 @@ public:
     {
         return v;
     }
+    Q_INVOKABLE
+    std::vector<int> integerStdVector(std::vector<int> v) const
+    {
+        return v;
+    }
     Q_INVOKABLE QVector<qreal> realVector(QVector<qreal> v) const
     {
         return v;
     }
+    Q_INVOKABLE
+    std::vector<qreal> realStdVector(std::vector<qreal> v) const
+    {
+        return v;
+    }
     Q_INVOKABLE QVector<bool> boolVector(QVector<bool> v) const
+    {
+        return v;
+    }
+    Q_INVOKABLE
+    std::vector<bool> boolStdVector(std::vector<bool> v) const
     {
         return v;
     }
@@ -515,6 +546,8 @@ void registerTypes()
     qmlRegisterType<QObjectContainer>("Qt.test", 1, 0, "QObjectContainer");
     qmlRegisterType<QObjectContainerWithGCOnAppend>("Qt.test", 1, 0, "QObjectContainerWithGCOnAppend");
     qmlRegisterType<FloatingQObject>("Qt.test", 1, 0, "FloatingQObject");
+
+    qmlRegisterType<ClashingNames>("Qt.test", 1, 0, "ClashingNames");
 }
 
 #include "testtypes.moc"

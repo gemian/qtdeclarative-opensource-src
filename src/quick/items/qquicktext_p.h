@@ -98,6 +98,9 @@ class Q_QUICK_PRIVATE_EXPORT QQuickText : public QQuickImplicitSizeItem
     Q_PROPERTY(qreal rightPadding READ rightPadding WRITE setRightPadding RESET resetRightPadding NOTIFY rightPaddingChanged REVISION 6)
     Q_PROPERTY(qreal bottomPadding READ bottomPadding WRITE setBottomPadding RESET resetBottomPadding NOTIFY bottomPaddingChanged REVISION 6)
 
+    Q_PROPERTY(QJSValue fontInfo READ fontInfo NOTIFY fontInfoChanged REVISION 9)
+    Q_PROPERTY(QSizeF advance READ advance NOTIFY contentSizeChanged REVISION 10)
+
 public:
     QQuickText(QQuickItem *parent=0);
     ~QQuickText();
@@ -218,7 +221,8 @@ public:
 
     QRectF boundingRect() const Q_DECL_OVERRIDE;
     QRectF clipRect() const Q_DECL_OVERRIDE;
-    Q_INVOKABLE void doLayout();
+    Q_INVOKABLE void doLayout(); // ### Qt 6: remove
+    Q_REVISION(9) Q_INVOKABLE void forceLayout();
 
     RenderType renderType() const;
     void setRenderType(RenderType renderType);
@@ -246,6 +250,9 @@ public:
     qreal bottomPadding() const;
     void setBottomPadding(qreal padding);
     void resetBottomPadding();
+
+    QJSValue fontInfo() const;
+    QSizeF advance() const;
 
 Q_SIGNALS:
     void textChanged(const QString &text);
@@ -279,6 +286,7 @@ Q_SIGNALS:
     Q_REVISION(6) void leftPaddingChanged();
     Q_REVISION(6) void rightPaddingChanged();
     Q_REVISION(6) void bottomPaddingChanged();
+    Q_REVISION(9) void fontInfoChanged();
 
 protected:
     QQuickText(QQuickTextPrivate &dd, QQuickItem *parent = 0);

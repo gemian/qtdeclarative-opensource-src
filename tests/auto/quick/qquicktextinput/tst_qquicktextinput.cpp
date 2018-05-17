@@ -105,6 +105,7 @@ private slots:
     void wrap();
     void selection();
     void persistentSelection();
+    void overwriteMode();
     void isRightToLeft_data();
     void isRightToLeft();
     void moveCursorSelection_data();
@@ -134,6 +135,7 @@ private slots:
 
     void signal_accepted();
     void signal_editingfinished();
+    void signal_textEdited();
 
     void passwordCharacter();
     void cursorDelegate_data();
@@ -144,7 +146,7 @@ private slots:
     void cursorRectangle();
     void navigation();
     void navigation_RTL();
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
     void copyAndPaste();
     void copyAndPasteKeySequence();
     void canPasteEmpty();
@@ -213,6 +215,9 @@ private slots:
     void clearInputMask();
     void keypress_inputMask_data();
     void keypress_inputMask();
+    void keypress_inputMethod_inputMask();
+    void keypress_inputMask_withValidator_data();
+    void keypress_inputMask_withValidator();
     void hasAcceptableInputMask_data();
     void hasAcceptableInputMask();
     void maskCharacter_data();
@@ -780,6 +785,48 @@ void tst_qquicktextinput::persistentSelection()
 
     input->setFocus(true);
     QCOMPARE(input->property("selected").toString(), QLatin1String("ell"));
+}
+
+void tst_qquicktextinput::overwriteMode()
+{
+    QString componentStr = "import QtQuick 2.0\nTextInput { focus: true; }";
+    QQmlComponent textInputComponent(&engine);
+    textInputComponent.setData(componentStr.toLatin1(), QUrl());
+    QQuickTextInput *textInput = qobject_cast<QQuickTextInput*>(textInputComponent.create());
+    QVERIFY(textInput != 0);
+
+    QSignalSpy spy(textInput, SIGNAL(overwriteModeChanged(bool)));
+
+    QQuickWindow window;
+    textInput->setParentItem(window.contentItem());
+    window.show();
+    window.requestActivate();
+    QTest::qWaitForWindowActive(&window);
+
+    QVERIFY(textInput->hasActiveFocus());
+
+    textInput->setOverwriteMode(true);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(true, textInput->overwriteMode());
+    textInput->setOverwriteMode(false);
+    QCOMPARE(spy.count(), 2);
+    QCOMPARE(false, textInput->overwriteMode());
+
+    QVERIFY(!textInput->overwriteMode());
+    QString insertString = "Some first text";
+    for (int j = 0; j < insertString.length(); j++)
+        QTest::keyClick(&window, insertString.at(j).toLatin1());
+
+    QCOMPARE(textInput->text(), QString("Some first text"));
+
+    textInput->setOverwriteMode(true);
+    QCOMPARE(spy.count(), 3);
+    textInput->setCursorPosition(5);
+
+    insertString = "shiny";
+    for (int j = 0; j < insertString.length(); j++)
+        QTest::keyClick(&window, insertString.at(j).toLatin1());
+    QCOMPARE(textInput->text(), QString("Some shiny text"));
 }
 
 void tst_qquicktextinput::isRightToLeft_data()
@@ -2247,8 +2294,9 @@ void tst_qquicktextinput::inputMethods()
     QGuiApplication::sendEvent(input, &event);
     QCOMPARE(input->text(), QString("Our Goodbye world!"));
     QCOMPARE(input->displayText(), QString("Our Goodbye world!"));
-    QCOMPARE(input->cursorPosition(), 7);
+    QCOMPARE(input->cursorPosition(), 3);
 
+    input->setCursorPosition(7);
     QInputMethodEvent preeditEvent("PREEDIT", QList<QInputMethodEvent::Attribute>());
     QGuiApplication::sendEvent(input, &preeditEvent);
     QCOMPARE(input->text(), QString("Our Goodbye world!"));
@@ -2398,6 +2446,57 @@ void tst_qquicktextinput::signal_editingfinished()
     QTRY_COMPARE(editingFinished2Spy.count(), 1);
 }
 
+void tst_qquicktextinput::signal_textEdited()
+{
+    QQuickWindow window;
+    window.show();
+    window.requestActivate();
+    QTest::qWaitForWindowActive(&window);
+
+    QQuickTextInput *input = new QQuickTextInput(window.contentItem());
+    QVERIFY(input);
+
+    QSignalSpy textChangedSpy(input, SIGNAL(textChanged()));
+    QVERIFY(textChangedSpy.isValid());
+
+    QSignalSpy textEditedSpy(input, SIGNAL(textEdited()));
+    QVERIFY(textEditedSpy.isValid());
+
+    input->forceActiveFocus();
+    QTRY_VERIFY(input->hasActiveFocus());
+
+    int textChanges = 0;
+    int textEdits = 0;
+
+    QTest::keyClick(&window, Qt::Key_A);
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), ++textEdits);
+
+    QTest::keyClick(&window, Qt::Key_B);
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), ++textEdits);
+
+    QTest::keyClick(&window, Qt::Key_C);
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), ++textEdits);
+
+    QTest::keyClick(&window, Qt::Key_Space);
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), ++textEdits);
+
+    QTest::keyClick(&window, Qt::Key_Backspace);
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), ++textEdits);
+
+    input->clear();
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), textEdits);
+
+    input->setText("TextInput");
+    QCOMPARE(textChangedSpy.count(), ++textChanges);
+    QCOMPARE(textEditedSpy.count(), textEdits);
+}
+
 /*
 TextInput element should only handle left/right keys until the cursor reaches
 the extent of the text, then they should ignore the keys.
@@ -2489,7 +2588,7 @@ void tst_qquicktextinput::navigation_RTL()
     QVERIFY(input->hasActiveFocus());
 }
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
 void tst_qquicktextinput::copyAndPaste()
 {
     if (!PlatformQuirks::isClipboardAvailable())
@@ -2587,7 +2686,7 @@ void tst_qquicktextinput::copyAndPaste()
 }
 #endif
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
 void tst_qquicktextinput::copyAndPasteKeySequence()
 {
     if (!PlatformQuirks::isClipboardAvailable())
@@ -2655,7 +2754,7 @@ void tst_qquicktextinput::copyAndPasteKeySequence()
 }
 #endif
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
 void tst_qquicktextinput::canPasteEmpty()
 {
     QGuiApplication::clipboard()->clear();
@@ -2671,7 +2770,7 @@ void tst_qquicktextinput::canPasteEmpty()
 }
 #endif
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
 void tst_qquicktextinput::canPaste()
 {
     QGuiApplication::clipboard()->setText("Some text");
@@ -2687,7 +2786,7 @@ void tst_qquicktextinput::canPaste()
 }
 #endif
 
-#ifndef QT_NO_CLIPBOARD
+#if QT_CONFIG(clipboard)
 void tst_qquicktextinput::middleClickPaste()
 {
     if (!PlatformQuirks::isClipboardAvailable())
@@ -3009,7 +3108,7 @@ void tst_qquicktextinput::cursorRectangle_data()
             << false;
 }
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
 #define COMPARE_INPUT_METHOD_QUERY(type, input, property, method, result) \
     QCOMPARE((type) input->inputMethodQuery(property).method(), result);
 #else
@@ -6015,6 +6114,87 @@ void tst_qquicktextinput::negativeDimensions()
     QCOMPARE(input->height(), qreal(-1));
 }
 
+void tst_qquicktextinput::keypress_inputMask_withValidator_data()
+{
+    QTest::addColumn<QString>("mask");
+    QTest::addColumn<qreal>("validatorMinimum");
+    QTest::addColumn<qreal>("validatorMaximum");
+    QTest::addColumn<int>("decimals");
+    QTest::addColumn<QString>("validatorRegExp");
+    QTest::addColumn<KeyList>("keys");
+    QTest::addColumn<QString>("expectedText");
+    QTest::addColumn<QString>("expectedDisplayText");
+
+    {
+        KeyList keys;
+        // inserting '1212' then two backspaces
+        keys << Qt::Key_Home << "1212" << Qt::Key_Backspace << Qt::Key_Backspace;
+        QTest::newRow("backspaceWithInt") << QString("9999;_") << 1.0 << 9999.00 << 0 << QString()
+                                             << keys << QString("12") << QString("12__");
+    }
+    {
+        KeyList keys;
+        // inserting '12.12' then two backspaces
+        keys << Qt::Key_Home << "12.12" << Qt::Key_Backspace << Qt::Key_Backspace;
+        QTest::newRow("backspaceWithDouble") << QString("99.99;_") << 1.0 << 99.99 << 2 << QString()
+                                             << keys << QString("12.") << QString("12.__");
+    }
+    {
+        KeyList keys;
+        // inserting '1111.11' then two backspaces
+        keys << Qt::Key_Home << "1111.11" << Qt::Key_Backspace << Qt::Key_Backspace;
+        QTest::newRow("backspaceWithRegExp") << QString("9999;_") << 0.0 << 0.0 << 0
+                                             << QString("/^[-]?((\\.\\d+)|(\\d+(\\.\\d+)?))$/")
+                                             << keys << QString("11") << QString("11__");
+    }
+    {
+        KeyList keys;
+        // inserting '99' - QTBUG-64616
+        keys << Qt::Key_Home << "99";
+        QTest::newRow("invalidTextWithRegExp") << QString("X9;_") << 0.0 << 0.0 << 0
+                                               << QString("/[+-][0+9]/")
+                                               << keys << QString("") << QString("__");
+    }
+}
+
+void tst_qquicktextinput::keypress_inputMask_withValidator()
+{
+    QFETCH(QString, mask);
+    QFETCH(qreal, validatorMinimum);
+    QFETCH(qreal, validatorMaximum);
+    QFETCH(int, decimals);
+    QFETCH(QString, validatorRegExp);
+    QFETCH(KeyList, keys);
+    QFETCH(QString, expectedText);
+    QFETCH(QString, expectedDisplayText);
+
+    QString componentStr = "import QtQuick 2.0\nTextInput { focus: true; inputMask: \"" + mask + "\"\n";
+    if (!validatorRegExp.isEmpty())
+        componentStr += "validator: RegExpValidator { regExp: " + validatorRegExp + " }\n}";
+    else if (decimals > 0)
+        componentStr += QString("validator: DoubleValidator { bottom: %1; decimals: %2; top: %3 }\n}").
+                            arg(validatorMinimum).arg(decimals).arg(validatorMaximum);
+    else
+        componentStr += QString("validator: IntValidator { bottom: %1; top: %2 }\n}").
+                            arg((int)validatorMinimum).arg((int)validatorMaximum);
+
+    QQmlComponent textInputComponent(&engine);
+    textInputComponent.setData(componentStr.toLatin1(), QUrl());
+    QQuickTextInput *textInput = qobject_cast<QQuickTextInput*>(textInputComponent.create());
+    QVERIFY(textInput != 0);
+
+    QQuickWindow window;
+    textInput->setParentItem(window.contentItem());
+    window.show();
+    window.requestActivate();
+    QTest::qWaitForWindowActive(&window);
+    QVERIFY(textInput->hasActiveFocus());
+
+    simulateKeys(&window, keys);
+
+    QCOMPARE(textInput->text(), expectedText);
+    QCOMPARE(textInput->displayText(), expectedDisplayText);
+}
 
 void tst_qquicktextinput::setInputMask_data()
 {
@@ -6386,6 +6566,48 @@ void tst_qquicktextinput::keypress_inputMask()
     QCOMPARE(textInput->displayText(), expectedDisplayText);
 }
 
+void tst_qquicktextinput::keypress_inputMethod_inputMask()
+{
+    // Similar to the keypress_inputMask test, but this is done solely via
+    // input methods
+    QString componentStr = "import QtQuick 2.0\nTextInput { focus: true; inputMask: \"AA.AA.AA\" }";
+    QQmlComponent textInputComponent(&engine);
+    textInputComponent.setData(componentStr.toLatin1(), QUrl());
+    QQuickTextInput *textInput = qobject_cast<QQuickTextInput*>(textInputComponent.create());
+    QVERIFY(textInput != 0);
+
+    QQuickWindow window;
+    textInput->setParentItem(window.contentItem());
+    window.show();
+    window.requestActivate();
+    QTest::qWaitForWindowActive(&window);
+    QVERIFY(textInput->hasActiveFocus());
+
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("", attributes);
+        event.setCommitString("EE");
+        QGuiApplication::sendEvent(textInput, &event);
+    }
+    QCOMPARE(textInput->cursorPosition(), 3);
+    QCOMPARE(textInput->text(), QStringLiteral("EE.."));
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("", attributes);
+        event.setCommitString("EE");
+        QGuiApplication::sendEvent(textInput, &event);
+    }
+    QCOMPARE(textInput->cursorPosition(), 6);
+    QCOMPARE(textInput->text(), QStringLiteral("EE.EE."));
+    {
+        QList<QInputMethodEvent::Attribute> attributes;
+        QInputMethodEvent event("", attributes);
+        event.setCommitString("EE");
+        QGuiApplication::sendEvent(textInput, &event);
+    }
+    QCOMPARE(textInput->cursorPosition(), 8);
+    QCOMPARE(textInput->text(), QStringLiteral("EE.EE.EE"));
+}
 
 void tst_qquicktextinput::hasAcceptableInputMask_data()
 {

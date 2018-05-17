@@ -73,10 +73,62 @@ static inline void setLocation(IR::Stmt *s, const SourceLocation &loc)
         s->location = loc;
 }
 
+static bool cjumpCanHandle(IR::AluOp op)
+{
+    switch (op) {
+    case IR::OpIn:
+    case IR::OpInstanceof:
+    case IR::OpEqual:
+    case IR::OpNotEqual:
+    case IR::OpGe:
+    case IR::OpGt:
+    case IR::OpLe:
+    case IR::OpLt:
+    case IR::OpStrictEqual:
+    case IR::OpStrictNotEqual:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline void setJumpOutLocation(IR::Stmt *s, const Statement *body,
+                                      const SourceLocation &fallback)
+{
+    switch (body->kind) {
+    // Statements where we might never execute the last line.
+    // Use the fallback.
+    case Statement::Kind_ConditionalExpression:
+    case Statement::Kind_ForEachStatement:
+    case Statement::Kind_ForStatement:
+    case Statement::Kind_IfStatement:
+    case Statement::Kind_LocalForEachStatement:
+    case Statement::Kind_LocalForStatement:
+    case Statement::Kind_WhileStatement:
+        setLocation(s, fallback);
+        break;
+    default:
+        setLocation(s, body->lastSourceLocation());
+        break;
+    }
+}
+
+static inline bool isSimpleExpr(IR::Expr *e)
+{
+    switch (e->exprKind) {
+    case IR::Expr::TempExpr:
+    case IR::Expr::ArgLocalExpr:
+    case IR::Expr::ConstExpr:
+        return true;
+    default:
+        return false;
+    }
+}
+
 Codegen::ScanFunctions::ScanFunctions(Codegen *cg, const QString &sourceCode, CompilationMode defaultProgramMode)
     : _cg(cg)
     , _sourceCode(sourceCode)
-    , _env(0)
+    , _variableEnvironment(0)
     , _allowFuncDecls(true)
     , defaultProgramMode(defaultProgramMode)
 {
@@ -90,17 +142,17 @@ void Codegen::ScanFunctions::operator()(Node *node)
 
 void Codegen::ScanFunctions::enterEnvironment(Node *node, CompilationMode compilationMode)
 {
-    Environment *e = _cg->newEnvironment(node, _env, compilationMode);
+    Environment *e = _cg->newEnvironment(node, _variableEnvironment, compilationMode);
     if (!e->isStrict)
         e->isStrict = _cg->_strictMode;
     _envStack.append(e);
-    _env = e;
+    _variableEnvironment = e;
 }
 
 void Codegen::ScanFunctions::leaveEnvironment()
 {
     _envStack.pop();
-    _env = _envStack.isEmpty() ? 0 : _envStack.top();
+    _variableEnvironment = _envStack.isEmpty() ? 0 : _envStack.top();
 }
 
 void Codegen::ScanFunctions::checkDirectivePrologue(SourceElements *ast)
@@ -116,7 +168,7 @@ void Codegen::ScanFunctions::checkDirectivePrologue(SourceElements *ast)
                         continue;
                     QStringRef str = _sourceCode.midRef(strLit->literalToken.offset + 1, strLit->literalToken.length - 2);
                     if (str == QLatin1String("use strict")) {
-                        _env->isStrict = true;
+                        _variableEnvironment->isStrict = true;
                     } else {
                         // TODO: give a warning.
                     }
@@ -131,7 +183,7 @@ void Codegen::ScanFunctions::checkDirectivePrologue(SourceElements *ast)
 
 void Codegen::ScanFunctions::checkName(const QStringRef &name, const SourceLocation &loc)
 {
-    if (_env->isStrict) {
+    if (_variableEnvironment->isStrict) {
         if (name == QLatin1String("implements")
                 || name == QLatin1String("interface")
                 || name == QLatin1String("let")
@@ -149,7 +201,7 @@ void Codegen::ScanFunctions::checkForArguments(AST::FormalParameterList *paramet
 {
     while (parameters) {
         if (parameters->name == QLatin1String("arguments"))
-            _env->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
+            _variableEnvironment->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
         parameters = parameters->next;
     }
 }
@@ -168,19 +220,19 @@ void Codegen::ScanFunctions::endVisit(Program *)
 
 bool Codegen::ScanFunctions::visit(CallExpression *ast)
 {
-    if (! _env->hasDirectEval) {
+    if (! _variableEnvironment->hasDirectEval) {
         if (IdentifierExpression *id = cast<IdentifierExpression *>(ast->base)) {
             if (id->name == QLatin1String("eval")) {
-                if (_env->usesArgumentsObject == Environment::ArgumentsObjectUnknown)
-                    _env->usesArgumentsObject = Environment::ArgumentsObjectUsed;
-                _env->hasDirectEval = true;
+                if (_variableEnvironment->usesArgumentsObject == Environment::ArgumentsObjectUnknown)
+                    _variableEnvironment->usesArgumentsObject = Environment::ArgumentsObjectUsed;
+                _variableEnvironment->hasDirectEval = true;
             }
         }
     }
     int argc = 0;
     for (ArgumentList *it = ast->arguments; it; it = it->next)
         ++argc;
-    _env->maxNumberOfArguments = qMax(_env->maxNumberOfArguments, argc);
+    _variableEnvironment->maxNumberOfArguments = qMax(_variableEnvironment->maxNumberOfArguments, argc);
     return true;
 }
 
@@ -189,7 +241,7 @@ bool Codegen::ScanFunctions::visit(NewMemberExpression *ast)
     int argc = 0;
     for (ArgumentList *it = ast->arguments; it; it = it->next)
         ++argc;
-    _env->maxNumberOfArguments = qMax(_env->maxNumberOfArguments, argc);
+    _variableEnvironment->maxNumberOfArguments = qMax(_variableEnvironment->maxNumberOfArguments, argc);
     return true;
 }
 
@@ -205,26 +257,38 @@ bool Codegen::ScanFunctions::visit(ArrayLiteral *ast)
         for (Elision *elision = ast->elision->next; elision; elision = elision->next)
             ++index;
     }
-    _env->maxNumberOfArguments = qMax(_env->maxNumberOfArguments, index);
+    _variableEnvironment->maxNumberOfArguments = qMax(_variableEnvironment->maxNumberOfArguments, index);
     return true;
 }
 
 bool Codegen::ScanFunctions::visit(VariableDeclaration *ast)
 {
-    if (_env->isStrict && (ast->name == QLatin1String("eval") || ast->name == QLatin1String("arguments")))
+    if (_variableEnvironment->isStrict && (ast->name == QLatin1String("eval") || ast->name == QLatin1String("arguments")))
         _cg->throwSyntaxError(ast->identifierToken, QStringLiteral("Variable name may not be eval or arguments in strict mode"));
     checkName(ast->name, ast->identifierToken);
     if (ast->name == QLatin1String("arguments"))
-        _env->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
-    _env->enter(ast->name.toString(), ast->expression ? Environment::VariableDefinition : Environment::VariableDeclaration);
+        _variableEnvironment->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
+    if (ast->scope == AST::VariableDeclaration::VariableScope::ReadOnlyBlockScope && !ast->expression) {
+        _cg->throwSyntaxError(ast->identifierToken, QStringLiteral("Missing initializer in const declaration"));
+        return false;
+    }
+    QString name = ast->name.toString();
+    const Environment::Member *m = 0;
+    if (_variableEnvironment->memberInfo(name, &m)) {
+        if (m->isLexicallyScoped() || ast->isLexicallyScoped()) {
+            _cg->throwSyntaxError(ast->identifierToken, QStringLiteral("Identifier %1 has already been declared").arg(name));
+            return false;
+        }
+    }
+    _variableEnvironment->enter(ast->name.toString(), ast->expression ? Environment::VariableDefinition : Environment::VariableDeclaration, ast->scope);
     return true;
 }
 
 bool Codegen::ScanFunctions::visit(IdentifierExpression *ast)
 {
     checkName(ast->name, ast->identifierToken);
-    if (_env->usesArgumentsObject == Environment::ArgumentsObjectUnknown && ast->name == QLatin1String("arguments"))
-        _env->usesArgumentsObject = Environment::ArgumentsObjectUsed;
+    if (_variableEnvironment->usesArgumentsObject == Environment::ArgumentsObjectUnknown && ast->name == QLatin1String("arguments"))
+        _variableEnvironment->usesArgumentsObject = Environment::ArgumentsObjectUsed;
     return true;
 }
 
@@ -256,7 +320,7 @@ bool Codegen::ScanFunctions::visit(FunctionExpression *ast)
 
 void Codegen::ScanFunctions::enterFunction(FunctionExpression *ast, bool enterName, bool isExpression)
 {
-    if (_env->isStrict && (ast->name == QLatin1String("eval") || ast->name == QLatin1String("arguments")))
+    if (_variableEnvironment->isStrict && (ast->name == QLatin1String("eval") || ast->name == QLatin1String("arguments")))
         _cg->throwSyntaxError(ast->identifierToken, QStringLiteral("Function name may not be eval or arguments in strict mode"));
     enterFunction(ast, ast->name.toString(), ast->formals, ast->body, enterName ? ast : 0, isExpression);
 }
@@ -277,7 +341,7 @@ bool Codegen::ScanFunctions::visit(ObjectLiteral *ast)
         if (AST::cast<AST::PropertyGetterSetter *>(it->assignment))
             ++argc;
     }
-    _env->maxNumberOfArguments = qMax(_env->maxNumberOfArguments, argc);
+    _variableEnvironment->maxNumberOfArguments = qMax(_variableEnvironment->maxNumberOfArguments, argc);
 
     TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, true);
     Node::accept(ast->properties, this);
@@ -309,7 +373,7 @@ void Codegen::ScanFunctions::endVisit(FunctionDeclaration *)
 
 bool Codegen::ScanFunctions::visit(WithStatement *ast)
 {
-    if (_env->isStrict) {
+    if (_variableEnvironment->isStrict) {
         _cg->throwSyntaxError(ast->withToken, QStringLiteral("'with' statement is not allowed in strict mode"));
         return false;
     }
@@ -319,7 +383,7 @@ bool Codegen::ScanFunctions::visit(WithStatement *ast)
 
 bool Codegen::ScanFunctions::visit(DoWhileStatement *ast) {
     {
-        TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_env->isStrict);
+        TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_variableEnvironment->isStrict);
         Node::accept(ast->statement, this);
     }
     Node::accept(ast->expression, this);
@@ -331,7 +395,7 @@ bool Codegen::ScanFunctions::visit(ForStatement *ast) {
     Node::accept(ast->condition, this);
     Node::accept(ast->expression, this);
 
-    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_env->isStrict);
+    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_variableEnvironment->isStrict);
     Node::accept(ast->statement, this);
 
     return false;
@@ -342,7 +406,7 @@ bool Codegen::ScanFunctions::visit(LocalForStatement *ast) {
     Node::accept(ast->condition, this);
     Node::accept(ast->expression, this);
 
-    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_env->isStrict);
+    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_variableEnvironment->isStrict);
     Node::accept(ast->statement, this);
 
     return false;
@@ -352,7 +416,7 @@ bool Codegen::ScanFunctions::visit(ForEachStatement *ast) {
     Node::accept(ast->initialiser, this);
     Node::accept(ast->expression, this);
 
-    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_env->isStrict);
+    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_variableEnvironment->isStrict);
     Node::accept(ast->statement, this);
 
     return false;
@@ -362,7 +426,7 @@ bool Codegen::ScanFunctions::visit(LocalForEachStatement *ast) {
     Node::accept(ast->declaration, this);
     Node::accept(ast->expression, this);
 
-    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_env->isStrict);
+    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, !_variableEnvironment->isStrict);
     Node::accept(ast->statement, this);
 
     return false;
@@ -370,12 +434,12 @@ bool Codegen::ScanFunctions::visit(LocalForEachStatement *ast) {
 
 bool Codegen::ScanFunctions::visit(ThisExpression *)
 {
-    _env->usesThis = true;
+    _variableEnvironment->usesThis = true;
     return false;
 }
 
 bool Codegen::ScanFunctions::visit(Block *ast) {
-    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, _env->isStrict ? false : _allowFuncDecls);
+    TemporaryBoolAssignment allowFuncDecls(_allowFuncDecls, _variableEnvironment->isStrict ? false : _allowFuncDecls);
     Node::accept(ast->statements, this);
     return false;
 }
@@ -383,26 +447,26 @@ bool Codegen::ScanFunctions::visit(Block *ast) {
 void Codegen::ScanFunctions::enterFunction(Node *ast, const QString &name, FormalParameterList *formals, FunctionBody *body, FunctionExpression *expr, bool isExpression)
 {
     bool wasStrict = false;
-    if (_env) {
-        _env->hasNestedFunctions = true;
+    if (_variableEnvironment) {
+        _variableEnvironment->hasNestedFunctions = true;
         // The identifier of a function expression cannot be referenced from the enclosing environment.
         if (expr)
-            _env->enter(name, Environment::FunctionDefinition, expr);
+            _variableEnvironment->enter(name, Environment::FunctionDefinition, AST::VariableDeclaration::FunctionScope, expr);
         if (name == QLatin1String("arguments"))
-            _env->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
-        wasStrict = _env->isStrict;
+            _variableEnvironment->usesArgumentsObject = Environment::ArgumentsObjectNotUsed;
+        wasStrict = _variableEnvironment->isStrict;
     }
 
     enterEnvironment(ast, FunctionCode);
     checkForArguments(formals);
 
-    _env->isNamedFunctionExpression = isExpression && !name.isEmpty();
-    _env->formals = formals;
+    _variableEnvironment->isNamedFunctionExpression = isExpression && !name.isEmpty();
+    _variableEnvironment->formals = formals;
 
     if (body)
         checkDirectivePrologue(body->elements);
 
-    if (wasStrict || _env->isStrict) {
+    if (wasStrict || _variableEnvironment->isStrict) {
         QStringList args;
         for (FormalParameterList *it = formals; it; it = it->next) {
             QString arg = it->name.toString();
@@ -426,7 +490,7 @@ Codegen::Codegen(bool strict)
     , _block(0)
     , _exitBlock(0)
     , _returnAddress(0)
-    , _env(0)
+    , _variableEnvironment(0)
     , _loop(0)
     , _labelledStatement(0)
     , _scopeAndFinally(0)
@@ -437,6 +501,7 @@ Codegen::Codegen(bool strict)
 }
 
 void Codegen::generateFromProgram(const QString &fileName,
+                                  const QString &finalUrl,
                                   const QString &sourceCode,
                                   Program *node,
                                   QV4::IR::Module *module,
@@ -446,9 +511,10 @@ void Codegen::generateFromProgram(const QString &fileName,
     Q_ASSERT(node);
 
     _module = module;
-    _env = 0;
+    _variableEnvironment = 0;
 
     _module->setFileName(fileName);
+    _module->setFinalUrl(finalUrl);
 
     ScanFunctions scan(this, sourceCode, mode);
     scan(node);
@@ -459,13 +525,15 @@ void Codegen::generateFromProgram(const QString &fileName,
 }
 
 void Codegen::generateFromFunctionExpression(const QString &fileName,
+                                             const QString &finalUrl,
                                              const QString &sourceCode,
                                              AST::FunctionExpression *ast,
                                              QV4::IR::Module *module)
 {
     _module = module;
     _module->setFileName(fileName);
-    _env = 0;
+    _module->setFinalUrl(finalUrl);
+    _variableEnvironment = 0;
 
     ScanFunctions scan(this, sourceCode, GlobalCode);
     // fake a global environment
@@ -482,14 +550,14 @@ void Codegen::generateFromFunctionExpression(const QString &fileName,
 
 void Codegen::enterEnvironment(Node *node)
 {
-    _env = _envMap.value(node);
-    Q_ASSERT(_env);
+    _variableEnvironment = _envMap.value(node);
+    Q_ASSERT(_variableEnvironment);
 }
 
 void Codegen::leaveEnvironment()
 {
-    Q_ASSERT(_env);
-    _env = _env->parent;
+    Q_ASSERT(_variableEnvironment);
+    _variableEnvironment = _variableEnvironment->parent;
 }
 
 void Codegen::enterLoop(Statement *node, IR::BasicBlock *breakBlock, IR::BasicBlock *continueBlock)
@@ -519,28 +587,6 @@ IR::Expr *Codegen::member(IR::Expr *base, const QString *name)
         move(_block->TEMP(t), base);
         return _block->MEMBER(_block->TEMP(t), name);
     }
-}
-
-IR::Expr *Codegen::subscript(IR::Expr *base, IR::Expr *index)
-{
-    if (hasError)
-        return 0;
-
-    if (! base->asTemp() || base->asArgLocal()) {
-        const unsigned t = _block->newTemp();
-        move(_block->TEMP(t), base);
-        base = _block->TEMP(t);
-    }
-
-    if (! index->asTemp() || index->asArgLocal()) {
-        const unsigned t = _block->newTemp();
-        move(_block->TEMP(t), index);
-        index = _block->TEMP(t);
-    }
-
-    Q_ASSERT(base->asTemp() || base->asArgLocal());
-    Q_ASSERT(index->asTemp() || index->asArgLocal());
-    return _block->SUBSCRIPT(base->asTemp(), index->asTemp());
 }
 
 IR::Expr *Codegen::argument(IR::Expr *expr)
@@ -595,12 +641,14 @@ IR::Expr *Codegen::unop(IR::AluOp op, IR::Expr *expr, const SourceLocation &loc)
             }
         }
     }
-    if (!expr->asTemp() && !expr->asArgLocal()) {
-        const unsigned t = _block->newTemp();
-        setLocation(move(_block->TEMP(t), expr), loc);
-        expr = _block->TEMP(t);
-    }
-    Q_ASSERT(expr->asTemp() || expr->asArgLocal());
+
+    TempScope scope(_function);
+    if (isSimpleExpr(expr))
+        return _block->UNOP(op, expr);
+
+    const unsigned t = _block->newTemp();
+    setLocation(move(_block->TEMP(t), expr), loc);
+    expr = _block->TEMP(t);
     return _block->UNOP(op, expr);
 }
 
@@ -609,9 +657,11 @@ IR::Expr *Codegen::binop(IR::AluOp op, IR::Expr *left, IR::Expr *right, const AS
     if (hasError)
         return 0;
 
+    TempScope scope(_function);
+
     if (IR::Const *c1 = left->asConst()) {
         if (IR::Const *c2 = right->asConst()) {
-            if (c1->type == IR::NumberType && c2->type == IR::NumberType) {
+            if ((c1->type & IR::NumberType) && (c2->type & IR::NumberType)) {
                 switch (op) {
                 case IR::OpAdd: return _block->CONST(IR::NumberType, c1->value + c2->value);
                 case IR::OpAnd: return _block->CONST(IR::BoolType, c1->value ? c2->value : 0);
@@ -659,20 +709,20 @@ IR::Expr *Codegen::binop(IR::AluOp op, IR::Expr *left, IR::Expr *right, const AS
         }
     }
 
-    if (!left->asTemp() && !left->asArgLocal()) {
+    if (!left->asTemp() && !left->asArgLocal() && !left->asConst()) {
         const unsigned t = _block->newTemp();
         setLocation(move(_block->TEMP(t), left), loc);
         left = _block->TEMP(t);
     }
 
-    if (!right->asTemp() && !right->asArgLocal()) {
+    if (!right->asTemp() && !right->asArgLocal() && !right->asConst()) {
         const unsigned t = _block->newTemp();
         setLocation(move(_block->TEMP(t), right), loc);
         right = _block->TEMP(t);
     }
 
-    Q_ASSERT(left->asTemp() || left->asArgLocal());
-    Q_ASSERT(right->asTemp() || right->asArgLocal());
+    Q_ASSERT(left->asTemp() || left->asArgLocal() || left->asConst());
+    Q_ASSERT(right->asTemp() || right->asArgLocal() || right->asConst());
 
     return _block->BINOP(op, left, right);
 }
@@ -696,6 +746,8 @@ IR::Stmt *Codegen::move(IR::Expr *target, IR::Expr *source, IR::AluOp op)
         return move(target, binop(op, target, source));
     }
 
+    TempScope scope(_function);
+
     if (!source->asTemp() && !source->asConst() && !target->asTemp() && !source->asArgLocal() && !target->asArgLocal()) {
         unsigned t = _block->newTemp();
         _block->MOVE(_block->TEMP(t), source);
@@ -715,7 +767,9 @@ IR::Stmt *Codegen::cjump(IR::Expr *cond, IR::BasicBlock *iftrue, IR::BasicBlock 
     if (hasError)
         return 0;
 
-    if (! (cond->asTemp() || cond->asBinop())) {
+    TempScope scope(_function);
+
+    if (! (cond->asTemp() || (cond->asBinop() && cjumpCanHandle(cond->asBinop()->op)) )) {
         const unsigned t = _block->newTemp();
         move(_block->TEMP(t), cond);
         cond = _block->TEMP(t);
@@ -734,12 +788,16 @@ void Codegen::accept(Node *node)
 
 void Codegen::statement(Statement *ast)
 {
+    TempScope scope(_function);
+
     _block->nextLocation = ast->firstSourceLocation();
     accept(ast);
 }
 
 void Codegen::statement(ExpressionNode *ast)
 {
+    TempScope scope(_function);
+
     if (! ast) {
         return;
     } else {
@@ -842,9 +900,17 @@ void Codegen::variableDeclaration(VariableDeclaration *ast)
     Q_ASSERT(expr.code);
     initializer = *expr;
 
-    int initialized = _block->newTemp();
-    move(_block->TEMP(initialized), initializer);
-    move(identifier(ast->name.toString(), ast->identifierToken.startLine, ast->identifierToken.startColumn), _block->TEMP(initialized));
+    IR::Expr *lhs = identifier(ast->name.toString(), ast->identifierToken.startLine,
+                               ast->identifierToken.startColumn);
+
+    if (lhs->asArgLocal()) {
+        move(lhs, initializer);
+    } else {
+        TempScope scope(_function);
+        int initialized = _block->newTemp();
+        move(_block->TEMP(initialized), initializer);
+        move(lhs, _block->TEMP(initialized));
+    }
 }
 
 void Codegen::variableDeclarationList(VariableDeclarationList *ast)
@@ -1044,6 +1110,10 @@ bool Codegen::visit(ArrayLiteral *ast)
     if (hasError)
         return false;
 
+    const unsigned t = _block->newTemp();
+
+    TempScope scope(_function);
+
     IR::ExprList *args = 0;
     IR::ExprList *current = 0;
     for (ElementList *it = ast->elements; it; it = it->next) {
@@ -1089,7 +1159,6 @@ bool Codegen::visit(ArrayLiteral *ast)
         current->expr = _block->CONST(IR::MissingType, 0);
     }
 
-    const unsigned t = _block->newTemp();
     move(_block->TEMP(t), _block->CALL(_block->NAME(IR::Name::builtin_define_array, 0, 0), args));
     _expr.code = _block->TEMP(t);
     return false;
@@ -1100,11 +1169,25 @@ bool Codegen::visit(ArrayMemberExpression *ast)
     if (hasError)
         return false;
 
-    Result base = expression(ast->base);
-    Result index = expression(ast->expression);
+    IR::Expr *base = *expression(ast->base);
     if (hasError)
         return false;
-    _expr.code = subscript(*base, *index);
+    if (!isSimpleExpr(base)) {
+        const unsigned t = _block->newTemp();
+        move(_block->TEMP(t), base);
+        base = _block->TEMP(t);
+    }
+
+    IR::Expr *index = *expression(ast->expression);
+    if (hasError)
+        return false;
+    if (!isSimpleExpr(index)) {
+        const unsigned t = _block->newTemp();
+        move(_block->TEMP(t), index);
+        index = _block->TEMP(t);
+    }
+
+    _expr.code = _block->SUBSCRIPT(base, index);
     return false;
 }
 
@@ -1240,14 +1323,12 @@ bool Codegen::visit(BinaryExpression *ast)
             return false;
         }
 
-        if (_expr.accept(nx)) {
-            move(left, *right, baseOp(ast->op));
-        } else {
-            const unsigned t = _block->newTemp();
-            move(_block->TEMP(t), *right);
-            move(left, _block->TEMP(t), baseOp(ast->op));
+        TempScope scope(_function);
+        const unsigned t = _block->newTemp();
+        move(_block->TEMP(t), *right);
+        move(left, _block->TEMP(t), baseOp(ast->op));
+        if (!_expr.accept(nx))
             _expr.code = left;
-        }
         break;
     }
 
@@ -1261,6 +1342,7 @@ bool Codegen::visit(BinaryExpression *ast)
     case QSOperator::Lt:
     case QSOperator::StrictEqual:
     case QSOperator::StrictNotEqual: {
+        TempScope scope(_function);
         if (!left->asTemp() && !left->asArgLocal() && !left->asConst()) {
             const unsigned t = _block->newTemp();
             setLocation(move(_block->TEMP(t), left), ast->operatorToken);
@@ -1274,14 +1356,7 @@ bool Codegen::visit(BinaryExpression *ast)
         if (_expr.accept(cx)) {
             setLocation(cjump(binop(IR::binaryOperator(ast->op), left, *right, ast->operatorToken), _expr.iftrue, _expr.iffalse), ast->operatorToken);
         } else {
-            IR::Expr *e = binop(IR::binaryOperator(ast->op), left, *right, ast->operatorToken);
-            if (e->asConst() || e->asString())
-                _expr.code = e;
-            else {
-                const unsigned t = _block->newTemp();
-                setLocation(move(_block->TEMP(t), e), ast->operatorToken);
-                _expr.code = _block->TEMP(t);
-            }
+            _expr.code = binop(IR::binaryOperator(ast->op), left, *right, ast->operatorToken);
         }
         break;
     }
@@ -1297,6 +1372,7 @@ bool Codegen::visit(BinaryExpression *ast)
     case QSOperator::RShift:
     case QSOperator::Sub:
     case QSOperator::URShift: {
+        TempScope scope(_function);
         if (!left->asTemp() && !left->asArgLocal() && !left->asConst()) {
             const unsigned t = _block->newTemp();
             setLocation(move(_block->TEMP(t), left), ast->operatorToken);
@@ -1307,14 +1383,7 @@ bool Codegen::visit(BinaryExpression *ast)
         if (hasError)
             return false;
 
-        IR::Expr *e = binop(IR::binaryOperator(ast->op), left, *right, ast->operatorToken);
-        if (e->asConst() || e->asString())
-            _expr.code = e;
-        else {
-            const unsigned t = _block->newTemp();
-            setLocation(move(_block->TEMP(t), e), ast->operatorToken);
-            _expr.code = _block->TEMP(t);
-        }
+        _expr.code = binop(IR::binaryOperator(ast->op), left, *right, ast->operatorToken);
         break;
     }
 
@@ -1355,6 +1424,7 @@ bool Codegen::visit(ConditionalExpression *ast)
     IR::BasicBlock *endif = _function->newBasicBlock(exceptionHandler());
 
     const unsigned t = _block->newTemp();
+    TempScope scope(_function);
 
     condition(ast->expression, iftrue, iffalse);
 
@@ -1389,7 +1459,7 @@ bool Codegen::visit(DeleteExpression *ast)
         return false;
     // Temporaries cannot be deleted
     IR::ArgLocal *al = expr->asArgLocal();
-    if (al && al->index < static_cast<unsigned>(_env->members.size())) {
+    if (al && al->index < static_cast<unsigned>(_variableEnvironment->members.size())) {
         // Trying to delete a function argument might throw.
         if (_function->isStrict) {
             throwSyntaxError(ast->deleteToken, QStringLiteral("Delete of an unqualified identifier in strict mode."));
@@ -1418,7 +1488,7 @@ bool Codegen::visit(DeleteExpression *ast)
     }
     if (expr->asTemp() ||
             (expr->asArgLocal() &&
-             expr->asArgLocal()->index >= static_cast<unsigned>(_env->members.size()))) {
+             expr->asArgLocal()->index >= static_cast<unsigned>(_variableEnvironment->members.size()))) {
         _expr.code = _block->CONST(IR::BoolType, 1);
         return false;
     }
@@ -1458,6 +1528,8 @@ bool Codegen::visit(FunctionExpression *ast)
     if (hasError)
         return false;
 
+    TempScope scope(_function);
+
     int function = defineFunction(ast->name.toString(), ast, ast->formals, ast->body ? ast->body->elements : 0);
     _expr.code = _block->CLOSURE(function);
     return false;
@@ -1469,11 +1541,11 @@ IR::Expr *Codegen::identifier(const QString &name, int line, int col)
         return 0;
 
     uint scope = 0;
-    Environment *e = _env;
+    Environment *e = _variableEnvironment;
     IR::Function *f = _function;
 
     while (f && e->parent) {
-        if (f->insideWithOrCatch || (f->isNamedExpression && f->name == name))
+        if (f->insideWithOrCatch || (f->isNamedExpression && QStringRef(f->name) == name))
             return _block->NAME(name, line, col);
 
         int index = e->findMember(name);
@@ -1484,7 +1556,7 @@ IR::Expr *Codegen::identifier(const QString &name, int line, int col)
                 al->isArgumentsOrEval = true;
             return al;
         }
-        const int argIdx = f->indexOfArgument(&name);
+        const int argIdx = f->indexOfArgument(QStringRef(&name));
         if (argIdx != -1)
             return _block->ARG(argIdx, scope);
 
@@ -1500,7 +1572,7 @@ IR::Expr *Codegen::identifier(const QString &name, int line, int col)
     if (IR::Expr *fallback = fallbackNameLookup(name, line, col))
         return fallback;
 
-    if (!e->parent && (!f || !f->insideWithOrCatch) && _env->compilationMode != EvalCode && e->compilationMode != QmlBinding)
+    if (!e->parent && (!f || !f->insideWithOrCatch) && _variableEnvironment->compilationMode != EvalCode && e->compilationMode != QmlBinding)
         return _block->GLOBALNAME(name, line, col);
 
     // global context or with. Lookup by name
@@ -1538,6 +1610,7 @@ bool Codegen::visit(NewExpression *ast)
 {
     if (hasError)
         return false;
+    TempScope scope(_function);
 
     Result base = expression(ast->expression);
     if (hasError)
@@ -1556,6 +1629,10 @@ bool Codegen::visit(NewMemberExpression *ast)
 {
     if (hasError)
         return false;
+
+    const unsigned t = _block->newTemp();
+
+    TempScope scope(_function);
 
     Result base = expression(ast->base);
     if (hasError)
@@ -1577,7 +1654,6 @@ bool Codegen::visit(NewMemberExpression *ast)
         (*args_it)->init(actual);
         args_it = &(*args_it)->next;
     }
-    const unsigned t = _block->newTemp();
     move(_block->TEMP(t), _block->NEW(expr, args));
     _expr.code = _block->TEMP(t);
     return false;
@@ -1588,10 +1664,12 @@ bool Codegen::visit(NotExpression *ast)
     if (hasError)
         return false;
 
+    const unsigned r = _block->newTemp();
+    TempScope scope(_function);
+
     Result expr = expression(ast->expression);
     if (hasError)
         return false;
-    const unsigned r = _block->newTemp();
     setLocation(move(_block->TEMP(r), unop(IR::OpNot, *expr, ast->notToken)), ast->notToken);
     _expr.code = _block->TEMP(r);
     return false;
@@ -1644,6 +1722,9 @@ bool Codegen::visit(ObjectLiteral *ast)
 
     QMap<QString, ObjectPropertyValue> valueMap;
 
+    const unsigned t = _block->newTemp();
+    TempScope scope(_function);
+
     for (PropertyAssignmentList *it = ast->properties; it; it = it->next) {
         QString name = it->assignment->name->asString();
         if (PropertyNameAndValue *nv = AST::cast<AST::PropertyNameAndValue *>(it->assignment)) {
@@ -1657,7 +1738,13 @@ bool Codegen::visit(ObjectLiteral *ast)
                 return false;
             }
 
-            valueMap[name].value = *value;
+            if (IR::Const *c = (*value)->asConst()) {
+                valueMap[name].value = c;
+            } else {
+                unsigned t = _block->newTemp();
+                move(_block->TEMP(t), *value);
+                valueMap[name].value = _block->TEMP(t);
+            }
         } else if (PropertyGetterSetter *gs = AST::cast<AST::PropertyGetterSetter *>(it->assignment)) {
             const int function = defineFunction(name, gs, gs->formals, gs->functionBody ? gs->functionBody->elements : 0);
             ObjectPropertyValue &v = valueMap[name];
@@ -1728,12 +1815,9 @@ bool Codegen::visit(ObjectLiteral *ast)
             current = current->next;
             current->expr = _block->CONST(IR::BoolType, true);
 
-            unsigned value = _block->newTemp();
-            move(_block->TEMP(value), it->value);
-
             current->next = _function->New<IR::ExprList>();
             current = current->next;
-            current->expr = _block->TEMP(value);
+            current->expr = it->value;
         } else {
             current->next = _function->New<IR::ExprList>();
             current = current->next;
@@ -1766,7 +1850,6 @@ bool Codegen::visit(ObjectLiteral *ast)
             args->next = arrayEntries;
     }
 
-    const unsigned t = _block->newTemp();
     move(_block->TEMP(t), _block->CALL(_block->NAME(IR::Name::builtin_define_object_literal,
          ast->firstSourceLocation().startLine, ast->firstSourceLocation().startColumn), args));
 
@@ -1792,6 +1875,7 @@ bool Codegen::visit(PostDecrementExpression *ast)
     const unsigned oldValue = _block->newTemp();
     setLocation(move(_block->TEMP(oldValue), unop(IR::OpUPlus, *expr, ast->decrementToken)), ast->decrementToken);
 
+    TempScope scope(_function);
     const unsigned  newValue = _block->newTemp();
     setLocation(move(_block->TEMP(newValue), binop(IR::OpSub, _block->TEMP(oldValue), _block->CONST(IR::NumberType, 1), ast->decrementToken)), ast->decrementToken);
     setLocation(move(*expr, _block->TEMP(newValue)), ast->decrementToken);
@@ -1820,6 +1904,7 @@ bool Codegen::visit(PostIncrementExpression *ast)
     const unsigned oldValue = _block->newTemp();
     setLocation(move(_block->TEMP(oldValue), unop(IR::OpUPlus, *expr, ast->incrementToken)), ast->incrementToken);
 
+    TempScope scope(_function);
     const unsigned  newValue = _block->newTemp();
     setLocation(move(_block->TEMP(newValue), binop(IR::OpAdd, _block->TEMP(oldValue), _block->CONST(IR::NumberType, 1), ast->incrementToken)), ast->incrementToken);
     setLocation(move(*expr, _block->TEMP(newValue)), ast->incrementToken);
@@ -1916,10 +2001,12 @@ bool Codegen::visit(TildeExpression *ast)
     if (hasError)
         return false;
 
+    const unsigned t = _block->newTemp();
+    TempScope scope(_function);
+
     Result expr = expression(ast->expression);
     if (hasError)
         return false;
-    const unsigned t = _block->newTemp();
     setLocation(move(_block->TEMP(t), unop(IR::OpCompl, *expr, ast->tildeToken)), ast->tildeToken);
     _expr.code = _block->TEMP(t);
     return false;
@@ -1942,6 +2029,8 @@ bool Codegen::visit(TypeOfExpression *ast)
 {
     if (hasError)
         return false;
+
+    TempScope scope(_function);
 
     Result expr = expression(ast->expression);
     if (hasError)
@@ -1985,6 +2074,8 @@ bool Codegen::visit(VoidExpression *ast)
     if (hasError)
         return false;
 
+    TempScope scope(_function);
+
     statement(ast->expression);
     _expr.code = _block->CONST(IR::UndefinedType, 0);
     return false;
@@ -1995,7 +2086,9 @@ bool Codegen::visit(FunctionDeclaration * ast)
     if (hasError)
         return false;
 
-    if (_env->compilationMode == QmlBinding)
+    TempScope scope(_function);
+
+    if (_variableEnvironment->compilationMode == QmlBinding)
         move(_block->TEMP(_returnAddress), _block->NAME(ast->name.toString(), 0, 0));
     _expr.accept(nx);
     return false;
@@ -2019,25 +2112,26 @@ int Codegen::defineFunction(const QString &name, AST::Node *ast,
 
     IR::BasicBlock *entryBlock = function->newBasicBlock(0);
     IR::BasicBlock *exitBlock = function->newBasicBlock(0, IR::Function::DontInsertBlock);
-    function->hasDirectEval = _env->hasDirectEval || _env->compilationMode == EvalCode
+    function->hasDirectEval = _variableEnvironment->hasDirectEval || _variableEnvironment->compilationMode == EvalCode
             || _module->debugMode; // Conditional breakpoints are like eval in the function
-    function->usesArgumentsObject = _env->parent && (_env->usesArgumentsObject == Environment::ArgumentsObjectUsed);
-    function->usesThis = _env->usesThis;
-    function->maxNumberOfArguments = qMax(_env->maxNumberOfArguments, (int)QV4::Global::ReservedArgumentCount);
-    function->isStrict = _env->isStrict;
-    function->isNamedExpression = _env->isNamedFunctionExpression;
+    function->usesArgumentsObject = _variableEnvironment->parent && (_variableEnvironment->usesArgumentsObject == Environment::ArgumentsObjectUsed);
+    function->usesThis = _variableEnvironment->usesThis;
+    function->maxNumberOfArguments = qMax(_variableEnvironment->maxNumberOfArguments, (int)QV4::Global::ReservedArgumentCount);
+    function->isStrict = _variableEnvironment->isStrict;
+    function->isNamedExpression = _variableEnvironment->isNamedFunctionExpression;
+    function->isQmlBinding = _variableEnvironment->compilationMode == QmlBinding;
 
     AST::SourceLocation loc = ast->firstSourceLocation();
     function->line = loc.startLine;
     function->column = loc.startColumn;
 
     if (function->usesArgumentsObject)
-        _env->enter(QStringLiteral("arguments"), Environment::VariableDeclaration);
+        _variableEnvironment->enter(QStringLiteral("arguments"), Environment::VariableDeclaration, AST::VariableDeclaration::FunctionScope);
 
     // variables in global code are properties of the global context object, not locals as with other functions.
-    if (_env->compilationMode == FunctionCode || _env->compilationMode == QmlBinding) {
+    if (_variableEnvironment->compilationMode == FunctionCode || _variableEnvironment->compilationMode == QmlBinding) {
         unsigned t = 0;
-        for (Environment::MemberMap::iterator it = _env->members.begin(), end = _env->members.end(); it != end; ++it) {
+        for (Environment::MemberMap::iterator it = _variableEnvironment->members.begin(), end = _variableEnvironment->members.end(); it != end; ++it) {
             const QString &local = it.key();
             function->LOCAL(local);
             (*it).index = t;
@@ -2045,18 +2139,19 @@ int Codegen::defineFunction(const QString &name, AST::Node *ast,
             ++t;
         }
     } else {
-        if (!_env->isStrict) {
-            foreach (const QString &inheritedLocal, inheritedLocals) {
+        if (!_variableEnvironment->isStrict) {
+            for (const QString &inheritedLocal : qAsConst(inheritedLocals)) {
                 function->LOCAL(inheritedLocal);
                 unsigned tempIndex = entryBlock->newTemp();
                 Environment::Member member = { Environment::UndefinedMember,
-                                               static_cast<int>(tempIndex), 0 };
-                _env->members.insert(inheritedLocal, member);
+                                               static_cast<int>(tempIndex), 0,
+                                               AST::VariableDeclaration::VariableScope::FunctionScope };
+                _variableEnvironment->members.insert(inheritedLocal, member);
             }
         }
 
         IR::ExprList *args = 0;
-        for (Environment::MemberMap::const_iterator it = _env->members.constBegin(), cend = _env->members.constEnd(); it != cend; ++it) {
+        for (Environment::MemberMap::const_iterator it = _variableEnvironment->members.constBegin(), cend = _variableEnvironment->members.constEnd(); it != cend; ++it) {
             const QString &local = it.key();
             IR::ExprList *next = function->New<IR::ExprList>();
             next->expr = entryBlock->NAME(local, 0, 0);
@@ -2088,11 +2183,11 @@ int Codegen::defineFunction(const QString &name, AST::Node *ast,
         _function->RECEIVE(it->name.toString());
     }
 
-    foreach (const Environment::Member &member, _env->members) {
+    for (const Environment::Member &member : qAsConst(_variableEnvironment->members)) {
         if (member.function) {
             const int function = defineFunction(member.function->name.toString(), member.function, member.function->formals,
                                                 member.function->body ? member.function->body->elements : 0);
-            if (! _env->parent) {
+            if (! _variableEnvironment->parent) {
                 move(_block->NAME(member.function->name.toString(), member.function->identifierToken.startLine, member.function->identifierToken.startColumn),
                      _block->CLOSURE(function));
             } else {
@@ -2156,6 +2251,8 @@ bool Codegen::visit(Block *ast)
     if (hasError)
         return false;
 
+    TempScope scope(_function);
+
     for (StatementList *it = ast->statements; it; it = it->next) {
         statement(it->statement);
     }
@@ -2166,6 +2263,8 @@ bool Codegen::visit(BreakStatement *ast)
 {
     if (hasError)
         return false;
+
+    TempScope scope(_function);
 
     if (!_loop) {
         throwSyntaxError(ast->lastSourceLocation(), QStringLiteral("Break outside of loop"));
@@ -2193,6 +2292,8 @@ bool Codegen::visit(ContinueStatement *ast)
 {
     if (hasError)
         return false;
+
+    TempScope scope(_function);
 
     Loop *loop = 0;
     if (ast->label.isEmpty()) {
@@ -2233,6 +2334,8 @@ bool Codegen::visit(DoWhileStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     IR::BasicBlock *loopbody = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *loopcond = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *loopend = _function->newBasicBlock(exceptionHandler());
@@ -2243,7 +2346,7 @@ bool Codegen::visit(DoWhileStatement *ast)
 
     _block = loopbody;
     statement(ast->statement);
-    _block->JUMP(loopcond);
+    setJumpOutLocation(_block->JUMP(loopcond), ast->statement, ast->semicolonToken);
 
     _block = loopcond;
     condition(ast->expression, loopbody, loopend);
@@ -2268,7 +2371,9 @@ bool Codegen::visit(ExpressionStatement *ast)
     if (hasError)
         return true;
 
-    if (_env->compilationMode == EvalCode || _env->compilationMode == QmlBinding) {
+    TempScope scope(_function);
+
+    if (_variableEnvironment->compilationMode == EvalCode || _variableEnvironment->compilationMode == QmlBinding) {
         Result e = expression(ast->expression);
         if (*e)
             move(_block->TEMP(_returnAddress), *e);
@@ -2282,6 +2387,8 @@ bool Codegen::visit(ForEachStatement *ast)
 {
     if (hasError)
         return true;
+
+    TempScope scope(_function);
 
     IR::BasicBlock *foreachin = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *foreachbody = _function->newBasicBlock(exceptionHandler());
@@ -2308,7 +2415,7 @@ bool Codegen::visit(ForEachStatement *ast)
         return false;
     move(*init, _block->TEMP(temp));
     statement(ast->statement);
-    _block->JUMP(foreachin);
+    setJumpOutLocation(_block->JUMP(foreachin), ast->statement, ast->forToken);
 
     _block = foreachin;
 
@@ -2329,6 +2436,8 @@ bool Codegen::visit(ForStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     IR::BasicBlock *forcond = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *forbody = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *forstep = _function->newBasicBlock(exceptionHandler());
@@ -2347,7 +2456,7 @@ bool Codegen::visit(ForStatement *ast)
 
     _block = forbody;
     statement(ast->statement);
-    _block->JUMP(forstep);
+    setJumpOutLocation(_block->JUMP(forstep), ast->statement, ast->forToken);
 
     _block = forstep;
     statement(ast->expression);
@@ -2365,6 +2474,8 @@ bool Codegen::visit(IfStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     IR::BasicBlock *iftrue = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *iffalse = ast->ko ? _function->newBasicBlock(exceptionHandler()) : 0;
     IR::BasicBlock *endif = _function->newBasicBlock(exceptionHandler());
@@ -2373,12 +2484,12 @@ bool Codegen::visit(IfStatement *ast)
 
     _block = iftrue;
     statement(ast->ok);
-    _block->JUMP(endif);
+    setJumpOutLocation(_block->JUMP(endif), ast->ok, ast->ifToken);
 
     if (ast->ko) {
         _block = iffalse;
         statement(ast->ko);
-        _block->JUMP(endif);
+        setJumpOutLocation(_block->JUMP(endif), ast->ko, ast->elseToken);
     }
 
     _block = endif;
@@ -2390,6 +2501,8 @@ bool Codegen::visit(LabelledStatement *ast)
 {
     if (hasError)
         return true;
+
+    TempScope scope(_function);
 
     // check that no outer loop contains the label
     Loop *l = _loop;
@@ -2428,6 +2541,8 @@ bool Codegen::visit(LocalForEachStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     IR::BasicBlock *foreachin = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *foreachbody = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *foreachend = _function->newBasicBlock(exceptionHandler());
@@ -2447,7 +2562,7 @@ bool Codegen::visit(LocalForEachStatement *ast)
     int temp = _block->newTemp();
     move(identifier(ast->declaration->name.toString()), _block->TEMP(temp));
     statement(ast->statement);
-    _block->JUMP(foreachin);
+    setJumpOutLocation(_block->JUMP(foreachin), ast->statement, ast->forToken);
 
     _block = foreachin;
 
@@ -2468,6 +2583,8 @@ bool Codegen::visit(LocalForStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     IR::BasicBlock *forcond = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *forbody = _function->newBasicBlock(exceptionHandler());
     IR::BasicBlock *forstep = _function->newBasicBlock(exceptionHandler());
@@ -2486,7 +2603,7 @@ bool Codegen::visit(LocalForStatement *ast)
 
     _block = forbody;
     statement(ast->statement);
-    _block->JUMP(forstep);
+    setJumpOutLocation(_block->JUMP(forstep), ast->statement, ast->forToken);
 
     _block = forstep;
     statement(ast->expression);
@@ -2504,7 +2621,7 @@ bool Codegen::visit(ReturnStatement *ast)
     if (hasError)
         return true;
 
-    if (_env->compilationMode != FunctionCode && _env->compilationMode != QmlBinding) {
+    if (_variableEnvironment->compilationMode != FunctionCode && _variableEnvironment->compilationMode != QmlBinding) {
         throwSyntaxError(ast->returnToken, QStringLiteral("Return statement outside of function"));
         return false;
     }
@@ -2529,6 +2646,8 @@ bool Codegen::visit(SwitchStatement *ast)
 {
     if (hasError)
         return true;
+
+    TempScope scope(_function);
 
     IR::BasicBlock *switchend = _function->newBasicBlock(exceptionHandler());
 
@@ -2625,6 +2744,8 @@ bool Codegen::visit(ThrowStatement *ast)
     if (hasError)
         return true;
 
+    TempScope scope(_function);
+
     Result expr = expression(ast->expression);
     move(_block->TEMP(_returnAddress), *expr);
     IR::ExprList *throwArgs = _function->New<IR::ExprList>();
@@ -2637,6 +2758,8 @@ bool Codegen::visit(TryStatement *ast)
 {
     if (hasError)
         return true;
+
+    TempScope scope(_function);
 
     _function->hasTry = true;
 
@@ -2716,6 +2839,8 @@ bool Codegen::visit(TryStatement *ast)
         _function->addBasicBlock(finallyBody);
         _block = finallyBody;
 
+        TempScope scope(_function);
+
         int hasException = _block->newTemp();
         move(_block->TEMP(hasException), _block->CALL(_block->NAME(IR::Name::builtin_unwind_exception, /*line*/0, /*column*/0), 0));
 
@@ -2787,7 +2912,7 @@ bool Codegen::visit(WhileStatement *ast)
 
     _block = whilebody;
     statement(ast->statement);
-    _block->JUMP(whilecond);
+    setJumpOutLocation(_block->JUMP(whilecond), ast->statement, ast->whileToken);
 
     _block = whileend;
     leaveLoop();
@@ -2799,6 +2924,8 @@ bool Codegen::visit(WithStatement *ast)
 {
     if (hasError)
         return true;
+
+    TempScope scope(_function);
 
     _function->hasWith = true;
 
@@ -2882,7 +3009,7 @@ bool Codegen::visit(UiSourceElement *)
 
 bool Codegen::throwSyntaxErrorOnEvalOrArgumentsInStrictMode(IR::Expr *expr, const SourceLocation& loc)
 {
-    if (!_env->isStrict)
+    if (!_variableEnvironment->isStrict)
         return false;
     if (IR::Name *n = expr->asName()) {
         if (*n->id != QLatin1String("eval") && *n->id != QLatin1String("arguments"))
@@ -2939,7 +3066,7 @@ QList<QQmlError> Codegen::qmlErrors() const
     qmlErrors.reserve(_errors.size());
 
     QUrl url(_fileNameIsUrl ? QUrl(_module->fileName) : QUrl::fromLocalFile(_module->fileName));
-    foreach (const QQmlJS::DiagnosticMessage &msg, _errors) {
+    for (const QQmlJS::DiagnosticMessage &msg: qAsConst(_errors)) {
         QQmlError e;
         e.setUrl(url);
         e.setLine(msg.loc.startLine);

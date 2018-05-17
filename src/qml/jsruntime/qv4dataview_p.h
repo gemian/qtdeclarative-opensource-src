@@ -60,14 +60,17 @@ namespace QV4 {
 namespace Heap {
 
 struct DataViewCtor : FunctionObject {
-    DataViewCtor(QV4::ExecutionContext *scope);
+    void init(QV4::ExecutionContext *scope);
 };
 
-struct DataView : Object {
-    DataView() {}
-    Pointer<ArrayBuffer> buffer;
-    uint byteLength;
-    uint byteOffset;
+#define DataViewMembers(class, Member) \
+    Member(class, Pointer, ArrayBuffer *, buffer) \
+    Member(class, NoMark, uint, byteLength) \
+    Member(class, NoMark, uint, byteOffset)
+
+DECLARE_HEAP_OBJECT(DataView, Object) {
+    DECLARE_MARK_TABLE(DataView);
+    void init() { Object::init(); }
 };
 
 }
@@ -76,37 +79,35 @@ struct DataViewCtor: FunctionObject
 {
     V4_OBJECT2(DataViewCtor, FunctionObject)
 
-    static ReturnedValue construct(const Managed *m, CallData *callData);
-    static ReturnedValue call(const Managed *that, CallData *callData);
+    static void construct(const Managed *m, Scope &scope, CallData *callData);
+    static void call(const Managed *that, Scope &scope, CallData *callData);
 };
 
 struct DataView : Object
 {
     V4_OBJECT2(DataView, Object)
     V4_PROTOTYPE(dataViewPrototype)
-
-    static void markObjects(Heap::Base *that, ExecutionEngine *e);
 };
 
 struct DataViewPrototype: Object
 {
     void init(ExecutionEngine *engine, Object *ctor);
 
-    static ReturnedValue method_get_buffer(CallContext *ctx);
-    static ReturnedValue method_get_byteLength(CallContext *ctx);
-    static ReturnedValue method_get_byteOffset(CallContext *ctx);
+    static void method_get_buffer(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_get_byteLength(const BuiltinFunction *, Scope &scope, CallData *callData);
+    static void method_get_byteOffset(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_getChar(CallContext *ctx);
+    static void method_getChar(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_get(CallContext *ctx);
+    static void method_get(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_getFloat(CallContext *ctx);
+    static void method_getFloat(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_setChar(CallContext *ctx);
+    static void method_setChar(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_set(CallContext *ctx);
+    static void method_set(const BuiltinFunction *, Scope &scope, CallData *callData);
     template <typename T>
-    static ReturnedValue method_setFloat(CallContext *ctx);
+    static void method_setFloat(const BuiltinFunction *, Scope &scope, CallData *callData);
 };
 
 

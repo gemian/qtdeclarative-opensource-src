@@ -40,7 +40,9 @@
 #include "qquickdesignersupport_p.h"
 #include <private/qquickitem_p.h>
 
+#if QT_CONFIG(quick_shadereffect)
 #include <QtQuick/private/qquickshadereffectsource_p.h>
+#endif
 #include <QtQuick/private/qquickrectangle_p.h>
 #include <QtQml/private/qabstractanimationjob_p.h>
 #include <private/qqmlengine_p.h>
@@ -51,6 +53,7 @@
 #include <private/qqmlvme_p.h>
 #include <private/qqmlcomponentattached_p.h>
 #include <private/qqmldata_p.h>
+#include <private/qsgadaptationlayer_p.h>
 
 #include "qquickdesignerwindowmanager_p.h"
 
@@ -87,11 +90,13 @@ void QQuickDesignerSupport::refFromEffectItem(QQuickItem *referencedItem, bool h
         QSGRenderContext *rc = QQuickWindowPrivate::get(referencedItem->window())->context;
         QSGLayer *texture = rc->sceneGraphContext()->createLayer(rc);
 
+        QSizeF itemSize = referencedItem->size();
         texture->setLive(true);
         texture->setItem(QQuickItemPrivate::get(referencedItem)->rootNode());
-        texture->setRect(referencedItem->boundingRect());
-        texture->setSize(referencedItem->boundingRect().size().toSize());
+        texture->setRect(QRectF(QPointF(0, 0), itemSize));
+        texture->setSize(itemSize.toSize());
         texture->setRecursive(true);
+#if QT_CONFIG(opengl)
 #ifndef QT_OPENGL_ES
         if (QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGL)
             texture->setFormat(GL_RGBA8);
@@ -99,6 +104,7 @@ void QQuickDesignerSupport::refFromEffectItem(QQuickItem *referencedItem, bool h
             texture->setFormat(GL_RGBA);
 #else
         texture->setFormat(GL_RGBA);
+#endif
 #endif
         texture->setHasMipmaps(false);
 
@@ -234,7 +240,8 @@ bool QQuickDesignerSupport::isAnchoredTo(QQuickItem *fromItem, QQuickItem *toIte
 
 bool QQuickDesignerSupport::areChildrenAnchoredTo(QQuickItem *fromItem, QQuickItem *toItem)
 {
-    Q_FOREACH (QQuickItem *childItem, fromItem->childItems()) {
+    const auto childItems = fromItem->childItems();
+    for (QQuickItem *childItem : childItems) {
         if (childItem) {
             if (isAnchoredTo(childItem, toItem))
                 return true;
@@ -390,10 +397,10 @@ void QQuickDesignerSupport::emitComponentCompleteSignalForAttachedProperty(QQuic
 QList<QObject*> QQuickDesignerSupport::statesForItem(QQuickItem *item)
 {
     QList<QObject*> objectList;
-    QList<QQuickState *> stateList = QQuickItemPrivate::get(item)->_states()->states();
+    const QList<QQuickState *> stateList = QQuickItemPrivate::get(item)->_states()->states();
 
     objectList.reserve(stateList.size());
-    Q_FOREACH (QQuickState* state, stateList)
+    for (QQuickState* state : stateList)
         objectList.append(state);
 
     return objectList;

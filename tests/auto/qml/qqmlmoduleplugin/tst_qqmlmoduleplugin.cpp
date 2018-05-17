@@ -29,6 +29,9 @@
 #include <qdir.h>
 #include <QtQml/qqmlengine.h>
 #include <QtQml/qqmlcomponent.h>
+#include <QtQml/qqmlextensionplugin.h>
+#include <QtCore/qjsondocument.h>
+#include <QtCore/qjsonarray.h>
 #include <QDebug>
 
 #if defined(Q_OS_MAC)
@@ -52,8 +55,7 @@ public:
 private slots:
     virtual void initTestCase();
     void importsPlugin();
-    void importsPlugin2();
-    void importsPlugin21();
+    void importsPlugin_data();
     void importsMixedQmlCppPlugin();
     void incorrectPluginCase();
     void importPluginWithQmlFile();
@@ -70,13 +72,82 @@ private slots:
     void importStrictModule();
     void importStrictModule_data();
     void importProtectedModule();
+    void importVersionedModule();
     void importsChildPlugin();
     void importsChildPlugin2();
     void importsChildPlugin21();
+    void parallelPluginImport();
 
 private:
     QString m_importsDirectory;
     QString m_dataImportsDirectory;
+};
+
+class PluginThatWaits : public QQmlExtensionPlugin
+{
+public:
+    static QByteArray metaData;
+
+    static QMutex initializeEngineEntered;
+    static QWaitCondition waitingForInitializeEngineEntry;
+    static QMutex leavingInitializeEngine;
+    static QWaitCondition waitingForInitializeEngineLeave;
+
+    void registerTypes(const char *uri) override
+    {
+        qmlRegisterModule(uri, 1, 0);
+    }
+
+    void initializeEngine(QQmlEngine *engine, const char *uri) override
+    {
+        initializeEngineEntered.lock();
+        leavingInitializeEngine.lock();
+        waitingForInitializeEngineEntry.wakeOne();
+        initializeEngineEntered.unlock();
+        waitingForInitializeEngineLeave.wait(&leavingInitializeEngine);
+        leavingInitializeEngine.unlock();
+    }
+};
+QByteArray PluginThatWaits::metaData;
+QMutex PluginThatWaits::initializeEngineEntered;
+QWaitCondition PluginThatWaits::waitingForInitializeEngineEntry;
+QMutex PluginThatWaits::leavingInitializeEngine;
+QWaitCondition PluginThatWaits::waitingForInitializeEngineLeave;
+
+class SecondStaticPlugin : public QQmlExtensionPlugin
+{
+public:
+    static QByteArray metaData;
+
+    void registerTypes(const char *uri) override
+    {
+        qmlRegisterModule(uri, 1, 0);
+    }
+};
+QByteArray SecondStaticPlugin::metaData;
+
+template <typename PluginType>
+void registerStaticPlugin(const char *uri)
+{
+    QStaticPlugin plugin;
+    plugin.instance = []() {
+        static PluginType plugin;
+        return static_cast<QObject*>(&plugin);
+    };
+
+    QJsonObject md;
+    md.insert(QStringLiteral("IID"), QQmlExtensionInterface_iid);
+    QJsonArray uris;
+    uris.append(uri);
+    md.insert(QStringLiteral("uri"), uris);
+
+    PluginType::metaData.append(QLatin1String("QTMETADATA  "));
+    PluginType::metaData.append(QJsonDocument(md).toBinaryData());
+
+    plugin.rawMetaData = []() {
+        return PluginType::metaData.constData();
+    };
+    qRegisterStaticPluginFunction(plugin);
 };
 
 void tst_qqmlmoduleplugin::initTestCase()
@@ -88,6 +159,9 @@ void tst_qqmlmoduleplugin::initTestCase()
     m_dataImportsDirectory = directory() + QStringLiteral("/imports");
     QVERIFY2(QFileInfo(m_dataImportsDirectory).isDir(),
              qPrintable(QString::fromLatin1("Imports directory '%1' does not exist.").arg(m_dataImportsDirectory)));
+
+    registerStaticPlugin<PluginThatWaits>("moduleWithWaitingPlugin");
+    registerStaticPlugin<SecondStaticPlugin>("moduleWithStaticPlugin");
 }
 
 #define VERIFY_ERRORS(errorfile) \
@@ -130,12 +204,15 @@ void tst_qqmlmoduleplugin::initTestCase()
 
 void tst_qqmlmoduleplugin::importsPlugin()
 {
+    QFETCH(QString, suffix);
+    QFETCH(QString, qmlFile);
+
     QQmlEngine engine;
     engine.addImportPath(m_importsDirectory);
-    QTest::ignoreMessage(QtWarningMsg, "plugin created");
-    QTest::ignoreMessage(QtWarningMsg, "import worked");
+    QTest::ignoreMessage(QtWarningMsg, qPrintable(QString("plugin%1 created").arg(suffix)));
+    QTest::ignoreMessage(QtWarningMsg, qPrintable(QString("import%1 worked").arg(suffix)));
     QTest::ignoreMessage(QtWarningMsg, "Module 'org.qtproject.AutoTestQmlPluginType' does not contain a module identifier directive - it cannot be protected from external registrations.");
-    QQmlComponent component(&engine, testFileUrl(QStringLiteral("works.qml")));
+    QQmlComponent component(&engine, testFileUrl(qmlFile));
     foreach (QQmlError err, component.errors())
         qWarning() << err;
     VERIFY_ERRORS(0);
@@ -145,38 +222,15 @@ void tst_qqmlmoduleplugin::importsPlugin()
     delete object;
 }
 
-void tst_qqmlmoduleplugin::importsPlugin2()
+void tst_qqmlmoduleplugin::importsPlugin_data()
 {
-    QQmlEngine engine;
-    engine.addImportPath(m_importsDirectory);
-    QTest::ignoreMessage(QtWarningMsg, "plugin2 created");
-    QTest::ignoreMessage(QtWarningMsg, "import2 worked");
-    QTest::ignoreMessage(QtWarningMsg, "Module 'org.qtproject.AutoTestQmlPluginType' does not contain a module identifier directive - it cannot be protected from external registrations.");
-    QQmlComponent component(&engine, testFileUrl(QStringLiteral("works2.qml")));
-    foreach (QQmlError err, component.errors())
-        qWarning() << err;
-    VERIFY_ERRORS(0);
-    QObject *object = component.create();
-    QVERIFY(object != 0);
-    QCOMPARE(object->property("value").toInt(),123);
-    delete object;
-}
+    QTest::addColumn<QString>("suffix");
+    QTest::addColumn<QString>("qmlFile");
 
-void tst_qqmlmoduleplugin::importsPlugin21()
-{
-    QQmlEngine engine;
-    engine.addImportPath(m_importsDirectory);
-    QTest::ignoreMessage(QtWarningMsg, "plugin2.1 created");
-    QTest::ignoreMessage(QtWarningMsg, "import2.1 worked");
-    QTest::ignoreMessage(QtWarningMsg, "Module 'org.qtproject.AutoTestQmlPluginType' does not contain a module identifier directive - it cannot be protected from external registrations.");
-    QQmlComponent component(&engine, testFileUrl(QStringLiteral("works21.qml")));
-    foreach (QQmlError err, component.errors())
-        qWarning() << err;
-    VERIFY_ERRORS(0);
-    QObject *object = component.create();
-    QVERIFY(object != 0);
-    QCOMPARE(object->property("value").toInt(),123);
-    delete object;
+    QTest::newRow("1.0") << "" << "works.qml";
+    QTest::newRow("2.0") << "2" << "works2.qml";
+    QTest::newRow("2.1") << "2.1" << "works21.qml";
+    QTest::newRow("2.2") << "2.2" << "works22.qml";
 }
 
 void tst_qqmlmoduleplugin::incorrectPluginCase()
@@ -578,6 +632,32 @@ void tst_qqmlmoduleplugin::importProtectedModule()
     QVERIFY(object != 0);
 }
 
+void tst_qqmlmoduleplugin::importVersionedModule()
+{
+    qmlRegisterType<QObject>("org.qtproject.VersionedModule", 1, 0, "TestType");
+    qmlRegisterModule("org.qtproject.VersionedModule", 1, 1);
+
+    QQmlEngine engine;
+    engine.addImportPath(m_importsDirectory);
+
+    QUrl url(testFileUrl("empty.qml"));
+
+    QQmlComponent component(&engine);
+    component.setData("import org.qtproject.VersionedModule 1.0\n TestType {}\n", url);
+    QScopedPointer<QObject> object10(component.create());
+    QVERIFY(!object10.isNull());
+
+    component.setData("import org.qtproject.VersionedModule 1.1\n TestType {}\n", url);
+    QScopedPointer<QObject> object11(component.create());
+    QVERIFY(!object11.isNull());
+
+    component.setData("import org.qtproject.VersionedModule 1.2\n TestType {}\n", url);
+    QTest::ignoreMessage(QtWarningMsg, "QQmlComponent: Component is not ready");
+    QScopedPointer<QObject> object12(component.create());
+    QVERIFY(object12.isNull());
+    QCOMPARE(component.errorString(), QString("%1:1 module \"org.qtproject.VersionedModule\" version 1.2 is not installed\n").arg(url.toString()));
+}
+
 void tst_qqmlmoduleplugin::importsChildPlugin()
 {
     QQmlEngine engine;
@@ -627,6 +707,51 @@ void tst_qqmlmoduleplugin::importsChildPlugin21()
     QVERIFY(object != 0);
     QCOMPARE(object->property("value").toInt(),123);
     delete object;
+}
+
+void tst_qqmlmoduleplugin::parallelPluginImport()
+{
+    QMutexLocker locker(&PluginThatWaits::initializeEngineEntered);
+
+    QThread worker;
+    QObject::connect(&worker, &QThread::started, [&worker](){
+        // Engines in separate threads are tricky, but as long as we do not create a graphical
+        // object and move objects created by the engines across thread boundaries, this is safe.
+        // At the same time this allows us to place the engine's loader thread into the position
+        // where, without the fix for this bug, the global lock is acquired.
+        QQmlEngine engineInThread;
+
+        QQmlComponent component(&engineInThread);
+        component.setData("import moduleWithWaitingPlugin 1.0\nimport QtQml 2.0\nQtObject {}",
+                          QUrl());
+
+        QScopedPointer<QObject> obj(component.create());
+        QVERIFY(!obj.isNull());
+
+        worker.quit();
+    });
+    worker.start();
+
+    PluginThatWaits::waitingForInitializeEngineEntry.wait(&PluginThatWaits::initializeEngineEntered);
+
+    {
+        // After acquiring this lock, the engine in the other thread as well as its type loader
+        // thread are blocked. However they should not hold the global plugin lock
+        // qmlEnginePluginsWithRegisteredTypes()->mutex in qqmllimports.cpp, allowing for the load
+        // of a component in a different engine with its own plugin to proceed.
+        QMutexLocker continuationLock(&PluginThatWaits::leavingInitializeEngine);
+
+        QQmlEngine secondEngine;
+        QQmlComponent secondComponent(&secondEngine);
+        secondComponent.setData("import moduleWithStaticPlugin 1.0\nimport QtQml 2.0\nQtObject {}",
+                                QUrl());
+        QScopedPointer<QObject> o(secondComponent.create());
+        QVERIFY(!o.isNull());
+
+        PluginThatWaits::waitingForInitializeEngineLeave.wakeOne();
+    }
+
+    worker.wait();
 }
 
 QTEST_MAIN(tst_qqmlmoduleplugin)

@@ -41,8 +41,11 @@ public:
 
 private slots:
     void abstractAnimation();
+
+#if defined(QT_BUILD_INTERNAL)
     void bulkValueAnimator();
     void propertyUpdater();
+#endif
 
     void animationtree_qml();
 
@@ -75,6 +78,7 @@ void tst_animation::abstractAnimation()
     }
 }
 
+#if defined(QT_BUILD_INTERNAL)
 void tst_animation::bulkValueAnimator()
 {
     QBENCHMARK {
@@ -90,6 +94,7 @@ void tst_animation::propertyUpdater()
         delete updater;
     }
 }
+#endif // QT_BUILD_INTERNAL
 
 void tst_animation::animationtree_qml()
 {
@@ -107,8 +112,8 @@ void tst_animation::animationelements_data()
 {
     QTest::addColumn<QString>("type");
 
-    QSet<QString> types = QQmlMetaType::qmlTypeNames().toSet();
-    foreach (const QString &type, types) {
+    const QSet<QString> types = QQmlMetaType::qmlTypeNames().toSet();
+    for (const QString &type : types) {
         if (type.contains(QLatin1String("Animation")))
             QTest::newRow(type.toLatin1()) << type;
     }
@@ -120,12 +125,12 @@ void tst_animation::animationelements_data()
 void tst_animation::animationelements()
 {
     QFETCH(QString, type);
-    QQmlType *t = QQmlMetaType::qmlType(type, 2, 0);
-    if (!t || !t->isCreatable())
+    QQmlType t = QQmlMetaType::qmlType(type, 2, 0);
+    if (!t.isValid() || !t.isCreatable())
         QSKIP("Non-creatable type");
 
     QBENCHMARK {
-        QObject *obj = t->create();
+        QObject *obj = t.create();
         delete obj;
     }
 }

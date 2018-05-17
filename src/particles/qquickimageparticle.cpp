@@ -44,11 +44,13 @@
 #include <QtQuick/qsgtexturematerial.h>
 #include <QtQuick/qsgtexture.h>
 #include <QFile>
+#include <QRandomGenerator>
 #include "qquickimageparticle_p.h"
 #include "qquickparticleemitter_p.h"
 #include <private/qquicksprite_p.h>
 #include <private/qquickspriteengine_p.h>
 #include <QOpenGLFunctions>
+#include <QSGRendererInterface>
 #include <QtQuick/private/qsgshadersourcebuilder_p.h>
 #include <QtQuick/private/qsgtexture_p.h>
 #include <private/qqmlglobal_p.h>
@@ -56,12 +58,6 @@
 #include <cmath>
 
 QT_BEGIN_NAMESPACE
-
-#if defined(Q_OS_BLACKBERRY)
-#define SHADER_PLATFORM_DEFINES "Q_OS_BLACKBERRY\n"
-#else
-#define SHADER_PLATFORM_DEFINES
-#endif
 
 //TODO: Make it larger on desktop? Requires fixing up shader code with the same define
 #define UNIFORM_ARRAY_SIZE 64
@@ -101,7 +97,6 @@ public:
         const bool isES = QOpenGLContext::currentContext()->isOpenGLES();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.vert"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("TABLE"));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
@@ -112,7 +107,6 @@ public:
         builder.clear();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.frag"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("TABLE"));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
@@ -125,15 +119,15 @@ public:
         Q_ASSERT(!m_fragment_code.isNull());
     }
 
-    const char *vertexShader() const { return m_vertex_code.constData(); }
-    const char *fragmentShader() const { return m_fragment_code.constData(); }
+    const char *vertexShader() const override { return m_vertex_code.constData(); }
+    const char *fragmentShader() const override { return m_fragment_code.constData(); }
 
-    QList<QByteArray> attributes() const {
+    QList<QByteArray> attributes() const override {
         return QList<QByteArray>() << "vPosTex" << "vData" << "vVec"
             << "vColor" << "vDeformVec" << "vRotation";
     };
 
-    void initialize() {
+    void initialize() override {
         QSGSimpleMaterialShader<TabledMaterialData>::initialize();
         program()->bind();
         program()->setUniformValue("_qt_texture", 0);
@@ -145,7 +139,7 @@ public:
         m_opacitytable_id = program()->uniformLocation("opacitytable");
     }
 
-    void updateState(const TabledMaterialData* d, const TabledMaterialData*) {
+    void updateState(const TabledMaterialData* d, const TabledMaterialData*) override {
         glFuncs->glActiveTexture(GL_TEXTURE1);
         d->colorTable->bind();
 
@@ -179,7 +173,6 @@ public:
         const bool isES = QOpenGLContext::currentContext()->isOpenGLES();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.vert"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
         if (isES)
@@ -189,7 +182,6 @@ public:
         builder.clear();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.frag"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
         if (isES)
@@ -201,15 +193,15 @@ public:
         Q_ASSERT(!m_fragment_code.isNull());
     }
 
-    const char *vertexShader() const { return m_vertex_code.constData(); }
-    const char *fragmentShader() const { return m_fragment_code.constData(); }
+    const char *vertexShader() const override { return m_vertex_code.constData(); }
+    const char *fragmentShader() const override { return m_fragment_code.constData(); }
 
-    QList<QByteArray> attributes() const {
+    QList<QByteArray> attributes() const override {
         return QList<QByteArray>() << "vPosTex" << "vData" << "vVec"
             << "vColor" << "vDeformVec" << "vRotation";
     };
 
-    void initialize() {
+    void initialize() override {
         QSGSimpleMaterialShader<DeformableMaterialData>::initialize();
         program()->bind();
         program()->setUniformValue("_qt_texture", 0);
@@ -218,7 +210,7 @@ public:
         m_entry_id = program()->uniformLocation("entry");
     }
 
-    void updateState(const DeformableMaterialData* d, const DeformableMaterialData*) {
+    void updateState(const DeformableMaterialData* d, const DeformableMaterialData*) override {
         d->texture->bind();
 
         program()->setUniformValue(m_timestamp_id, (float) d->timestamp);
@@ -244,7 +236,6 @@ public:
         const bool isES = QOpenGLContext::currentContext()->isOpenGLES();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.vert"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("SPRITE"));
         builder.addDefinition(QByteArrayLiteral("TABLE"));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
@@ -256,7 +247,6 @@ public:
         builder.clear();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.frag"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("SPRITE"));
         builder.addDefinition(QByteArrayLiteral("TABLE"));
         builder.addDefinition(QByteArrayLiteral("DEFORM"));
@@ -270,15 +260,15 @@ public:
         Q_ASSERT(!m_fragment_code.isNull());
     }
 
-    const char *vertexShader() const { return m_vertex_code.constData(); }
-    const char *fragmentShader() const { return m_fragment_code.constData(); }
+    const char *vertexShader() const override { return m_vertex_code.constData(); }
+    const char *fragmentShader() const override { return m_fragment_code.constData(); }
 
-    QList<QByteArray> attributes() const {
+    QList<QByteArray> attributes() const override {
         return QList<QByteArray>() << "vPosTex" << "vData" << "vVec"
             << "vColor" << "vDeformVec" << "vRotation" << "vAnimData" << "vAnimPos";
     }
 
-    void initialize() {
+    void initialize() override {
         QSGSimpleMaterialShader<SpriteMaterialData>::initialize();
         program()->bind();
         program()->setUniformValue("_qt_texture", 0);
@@ -291,7 +281,7 @@ public:
         m_opacitytable_id = program()->uniformLocation("opacitytable");
     }
 
-    void updateState(const SpriteMaterialData* d, const SpriteMaterialData*) {
+    void updateState(const SpriteMaterialData* d, const SpriteMaterialData*) override {
         glFuncs->glActiveTexture(GL_TEXTURE1);
         d->colorTable->bind();
 
@@ -326,7 +316,6 @@ public:
         const bool isES = QOpenGLContext::currentContext()->isOpenGLES();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.vert"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
         if (isES)
             builder.removeVersion();
@@ -335,7 +324,6 @@ public:
         builder.clear();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.frag"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         builder.addDefinition(QByteArrayLiteral("COLOR"));
         if (isES)
             builder.removeVersion();
@@ -346,10 +334,10 @@ public:
         Q_ASSERT(!m_fragment_code.isNull());
     }
 
-    const char *vertexShader() const { return m_vertex_code.constData(); }
-    const char *fragmentShader() const { return m_fragment_code.constData(); }
+    const char *vertexShader() const override { return m_vertex_code.constData(); }
+    const char *fragmentShader() const override { return m_fragment_code.constData(); }
 
-    void activate() {
+    void activate() override {
         QSGSimpleMaterialShader<ColoredMaterialData>::activate();
 #if !defined(QT_OPENGL_ES_2) && !defined(Q_OS_WIN)
         glEnable(GL_POINT_SPRITE);
@@ -357,7 +345,7 @@ public:
 #endif
     }
 
-    void deactivate() {
+    void deactivate() override {
         QSGSimpleMaterialShader<ColoredMaterialData>::deactivate();
 #if !defined(QT_OPENGL_ES_2) && !defined(Q_OS_WIN)
         glDisable(GL_POINT_SPRITE);
@@ -365,11 +353,11 @@ public:
 #endif
     }
 
-    QList<QByteArray> attributes() const {
+    QList<QByteArray> attributes() const override {
         return QList<QByteArray>() << "vPos" << "vData" << "vVec" << "vColor";
     }
 
-    void initialize() {
+    void initialize() override {
         QSGSimpleMaterialShader<ColoredMaterialData>::initialize();
         program()->bind();
         program()->setUniformValue("_qt_texture", 0);
@@ -378,7 +366,7 @@ public:
         m_entry_id = program()->uniformLocation("entry");
     }
 
-    void updateState(const ColoredMaterialData* d, const ColoredMaterialData*) {
+    void updateState(const ColoredMaterialData* d, const ColoredMaterialData*) override {
         d->texture->bind();
 
         program()->setUniformValue(m_timestamp_id, (float) d->timestamp);
@@ -404,7 +392,6 @@ public:
         const bool isES = QOpenGLContext::currentContext()->isOpenGLES();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.vert"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         if (isES)
             builder.removeVersion();
 
@@ -412,7 +399,6 @@ public:
         builder.clear();
 
         builder.appendSourceFile(QStringLiteral(":/particles/shaders/imageparticle.frag"));
-        builder.addDefinition(QByteArray(SHADER_PLATFORM_DEFINES));
         if (isES)
             builder.removeVersion();
 
@@ -422,10 +408,10 @@ public:
         Q_ASSERT(!m_fragment_code.isNull());
     }
 
-    const char *vertexShader() const { return m_vertex_code.constData(); }
-    const char *fragmentShader() const { return m_fragment_code.constData(); }
+    const char *vertexShader() const override { return m_vertex_code.constData(); }
+    const char *fragmentShader() const override { return m_fragment_code.constData(); }
 
-    void activate() {
+    void activate() override {
         QSGSimpleMaterialShader<SimpleMaterialData>::activate();
 #if !defined(QT_OPENGL_ES_2) && !defined(Q_OS_WIN)
         glEnable(GL_POINT_SPRITE);
@@ -433,7 +419,7 @@ public:
 #endif
     }
 
-    void deactivate() {
+    void deactivate() override {
         QSGSimpleMaterialShader<SimpleMaterialData>::deactivate();
 #if !defined(QT_OPENGL_ES_2) && !defined(Q_OS_WIN)
         glDisable(GL_POINT_SPRITE);
@@ -441,11 +427,11 @@ public:
 #endif
     }
 
-    QList<QByteArray> attributes() const {
+    QList<QByteArray> attributes() const override {
         return QList<QByteArray>() << "vPos" << "vData" << "vVec";
     }
 
-    void initialize() {
+    void initialize() override {
         QSGSimpleMaterialShader<SimpleMaterialData>::initialize();
         program()->bind();
         program()->setUniformValue("_qt_texture", 0);
@@ -454,7 +440,7 @@ public:
         m_entry_id = program()->uniformLocation("entry");
     }
 
-    void updateState(const SimpleMaterialData* d, const SimpleMaterialData*) {
+    void updateState(const SimpleMaterialData* d, const SimpleMaterialData*) override {
         d->texture->bind();
 
         program()->setUniformValue(m_timestamp_id, (float) d->timestamp);
@@ -509,6 +495,8 @@ void fillUniformArrayFromImage(float* array, const QImage& img, int size)
     So if you explicitly set an attribute affecting color, such as redVariation, and then reset it (by setting redVariation
     to undefined), all color data will be reset and it will begin to have an implicit value of any shared color from
     other ImageParticles.
+
+    \note The maximum number of image particles is limited to 16383.
 */
 /*!
     \qmlproperty url QtQuick.Particles::ImageParticle::source
@@ -1239,8 +1227,9 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
     if (!QOpenGLContext::currentContext())
         return;
 
-    if (QOpenGLContext::currentContext()->isOpenGLES() && m_count * 4 > 0xffff) {
-        printf("ImageParticle: Too many particles - maximum 16,000 per ImageParticle.\n");//ES 2 vertex count limit is ushort
+    if (m_count * 4 > 0xffff) {
+        // Index data is ushort.
+        qmlInfo(this) << "ImageParticle: Too many particles - maximum 16383 per ImageParticle";
         return;
     }
 
@@ -1291,14 +1280,16 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
     // OS X 10.8.3 introduced a bug in the AMD drivers, for at least the 2011 macbook pros,
     // causing point sprites who read gl_PointCoord in the frag shader to come out as
     // green-red blobs.
-    if (perfLevel < Deformable && strstr((char *) glGetString(GL_VENDOR), "ATI")) {
+    const GLubyte *glVendor = QOpenGLContext::currentContext()->functions()->glGetString(GL_VENDOR);
+    if (perfLevel < Deformable && glVendor && strstr((char *) glVendor, "ATI")) {
         perfLevel = Deformable;
     }
 #endif
 
 #ifdef Q_OS_LINUX
     // Nouveau drivers can potentially freeze a machine entirely when taking the point-sprite path.
-    if (perfLevel < Deformable && strstr((const char *) glGetString(GL_VENDOR), "nouveau"))
+    const GLubyte *glVendor = QOpenGLContext::currentContext()->functions()->glGetString(GL_VENDOR);
+    if (perfLevel < Deformable && glVendor && strstr((const char *) glVendor, "nouveau"))
         perfLevel = Deformable;
 #endif
 
@@ -1333,6 +1324,7 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
         getState<ImageMaterialData>(m_material)->animSheetSize = QSizeF(image.size());
         if (m_spriteEngine)
             m_spriteEngine->setCount(m_count);
+        Q_FALLTHROUGH();
     case Tabled:
         if (!m_material)
             m_material = TabledMaterial::createMaterial();
@@ -1341,21 +1333,21 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
             if (m_colorTable->pix.isReady())
                 colortable = m_colorTable->pix.image();
             else
-                qmlInfo(this) << "Error loading color table: " << m_colorTable->pix.error();
+                qmlWarning(this) << "Error loading color table: " << m_colorTable->pix.error();
         }
 
         if (m_sizeTable) {
             if (m_sizeTable->pix.isReady())
                 sizetable = m_sizeTable->pix.image();
             else
-                qmlInfo(this) << "Error loading size table: " << m_sizeTable->pix.error();
+                qmlWarning(this) << "Error loading size table: " << m_sizeTable->pix.error();
         }
 
         if (m_opacityTable) {
             if (m_opacityTable->pix.isReady())
                 opacitytable = m_opacityTable->pix.image();
             else
-                qmlInfo(this) << "Error loading opacity table: " << m_opacityTable->pix.error();
+                qmlWarning(this) << "Error loading opacity table: " << m_opacityTable->pix.error();
         }
 
         if (colortable.isNull()){//###Goes through image just for this
@@ -1365,19 +1357,22 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
         getState<ImageMaterialData>(m_material)->colorTable = QSGPlainTexture::fromImage(colortable);
         fillUniformArrayFromImage(getState<ImageMaterialData>(m_material)->sizeTable, sizetable, UNIFORM_ARRAY_SIZE);
         fillUniformArrayFromImage(getState<ImageMaterialData>(m_material)->opacityTable, opacitytable, UNIFORM_ARRAY_SIZE);
+        Q_FALLTHROUGH();
     case Deformable:
         if (!m_material)
             m_material = DeformableMaterial::createMaterial();
+        Q_FALLTHROUGH();
     case Colored:
         if (!m_material)
             m_material = ColoredMaterial::createMaterial();
+        Q_FALLTHROUGH();
     default://Also Simple
         if (!m_material)
             m_material = SimpleMaterial::createMaterial();
         if (!imageLoaded) {
             if (!m_image || !m_image->pix.isReady()) {
                 if (m_image)
-                    qmlInfo(this) << m_image->pix.error();
+                    qmlWarning(this) << m_image->pix.error();
                 delete m_material;
                 return;
             }
@@ -1469,8 +1464,17 @@ void QQuickImageParticle::finishBuildParticleNodes(QSGNode** node)
     update();
 }
 
+static inline bool isOpenGL(QSGRenderContext *rc)
+{
+    QSGRendererInterface *rif = rc->sceneGraphContext()->rendererInterface(rc);
+    return !rif || rif->graphicsApi() == QSGRendererInterface::OpenGL;
+}
+
 QSGNode *QQuickImageParticle::updatePaintNode(QSGNode *node, UpdatePaintNodeData *)
 {
+    if (!node && !isOpenGL(QQuickItemPrivate::get(this)->sceneGraphRenderContext()))
+        return 0;
+
     if (m_pleaseReset){
         if (node)
             delete node;
@@ -1531,6 +1535,7 @@ void QQuickImageParticle::prepareNextFrame(QSGNode **node)
         if (m_spriteEngine)
             m_spriteEngine->updateSprites(timeStamp);//fires signals if anim changed
         spritesUpdate(time);
+        Q_FALLTHROUGH();
     case Tabled:
     case Deformable:
     case Colored:
@@ -1692,6 +1697,7 @@ void QQuickImageParticle::initialize(int gIdx, int pIdx)
                 writeTo->animWidth = getState<ImageMaterialData>(m_material)->animSheetSize.width();
                 writeTo->animHeight = getState<ImageMaterialData>(m_material)->animSheetSize.height();
             }
+            Q_FALLTHROUGH();
         case Tabled:
         case Deformable:
             //Initial Rotation
@@ -1724,9 +1730,9 @@ void QQuickImageParticle::initialize(int gIdx, int pIdx)
                 if (!datum->rotationOwner)
                     datum->rotationOwner = this;
                 rotation =
-                        (m_rotation + (m_rotationVariation - 2*((qreal)rand()/RAND_MAX)*m_rotationVariation) ) * CONV;
+                        (m_rotation + (m_rotationVariation - 2*QRandomGenerator::global()->bounded(m_rotationVariation)) ) * CONV;
                 rotationVelocity =
-                        (m_rotationVelocity + (m_rotationVelocityVariation - 2*((qreal)rand()/RAND_MAX)*m_rotationVelocityVariation) ) * CONV;
+                        (m_rotationVelocity + (m_rotationVelocityVariation - 2*QRandomGenerator::global()->bounded(m_rotationVelocityVariation)) ) * CONV;
                 autoRotate = m_autoRotation?1.0:0.0;
                 if (datum->rotationOwner == this) {
                     datum->rotation = rotation;
@@ -1738,16 +1744,17 @@ void QQuickImageParticle::initialize(int gIdx, int pIdx)
                     getShadowDatum(datum)->autoRotate = autoRotate;
                 }
             }
+            Q_FALLTHROUGH();
         case Colored:
             //Color initialization
             // Particle color
             if (m_explicitColor) {
                 if (!datum->colorOwner)
                     datum->colorOwner = this;
-                color.r = m_color.red() * (1 - redVariation) + rand() % 256 * redVariation;
-                color.g = m_color.green() * (1 - greenVariation) + rand() % 256 * greenVariation;
-                color.b = m_color.blue() * (1 - blueVariation) + rand() % 256 * blueVariation;
-                color.a = m_alpha * m_color.alpha() * (1 - m_alphaVariation) + rand() % 256 * m_alphaVariation;
+                color.r = m_color.red() * (1 - redVariation) + QRandomGenerator::global()->bounded(256) * redVariation;
+                color.g = m_color.green() * (1 - greenVariation) + QRandomGenerator::global()->bounded(256) * greenVariation;
+                color.b = m_color.blue() * (1 - blueVariation) + QRandomGenerator::global()->bounded(256) * blueVariation;
+                color.a = m_alpha * m_color.alpha() * (1 - m_alphaVariation) + QRandomGenerator::global()->bounded(256) * m_alphaVariation;
                 if (datum->colorOwner == this)
                     datum->color = color;
                 else
@@ -1921,3 +1928,5 @@ void QQuickImageParticle::commit(int gIdx, int pIdx)
 
 
 QT_END_NAMESPACE
+
+#include "moc_qquickimageparticle_p.cpp"

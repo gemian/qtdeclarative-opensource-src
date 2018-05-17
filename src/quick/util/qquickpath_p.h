@@ -51,10 +51,15 @@
 // We mean it.
 //
 
+#include <private/qtquickglobal_p.h>
+
+QT_REQUIRE_CONFIG(quick_path);
+
 #include <qqml.h>
 
 #include <private/qqmlnullablevalue_p.h>
 #include <private/qbezier_p.h>
+#include <private/qtquickglobal_p.h>
 
 #include <QtCore/QObject>
 #include <QtGui/QPainterPath>
@@ -69,7 +74,7 @@ struct QQuickPathData
     QList<QQuickCurve*> curves;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathElement : public QObject
+class Q_QUICK_PRIVATE_EXPORT QQuickPathElement : public QObject
 {
     Q_OBJECT
 public:
@@ -78,7 +83,7 @@ Q_SIGNALS:
     void changed();
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathAttribute : public QQuickPathElement
+class Q_QUICK_PRIVATE_EXPORT QQuickPathAttribute : public QQuickPathElement
 {
     Q_OBJECT
 
@@ -103,7 +108,7 @@ private:
     qreal _value;
 };
 
-class Q_AUTOTEST_EXPORT QQuickCurve : public QQuickPathElement
+class Q_QUICK_PRIVATE_EXPORT QQuickCurve : public QQuickPathElement
 {
     Q_OBJECT
 
@@ -145,16 +150,25 @@ private:
     QQmlNullableValue<qreal> _relativeY;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathLine : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathLine : public QQuickCurve
 {
     Q_OBJECT
 public:
     QQuickPathLine(QObject *parent=0) : QQuickCurve(parent) {}
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathQuad : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathMove : public QQuickCurve
+{
+    Q_OBJECT
+public:
+    QQuickPathMove(QObject *parent=0) : QQuickCurve(parent) {}
+
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
+};
+
+class Q_QUICK_PRIVATE_EXPORT QQuickPathQuad : public QQuickCurve
 {
     Q_OBJECT
 
@@ -179,7 +193,7 @@ public:
     void setRelativeControlY(qreal y);
     bool hasRelativeControlY();
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 
 Q_SIGNALS:
     void controlXChanged();
@@ -194,7 +208,7 @@ private:
     QQmlNullableValue<qreal> _relativeControlY;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathCubic : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathCubic : public QQuickCurve
 {
     Q_OBJECT
 
@@ -237,7 +251,7 @@ public:
     void setRelativeControl2Y(qreal y);
     bool hasRelativeControl2Y();
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 
 Q_SIGNALS:
     void control1XChanged();
@@ -260,26 +274,27 @@ private:
     QQmlNullableValue<qreal> _relativeControl2Y;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathCatmullRomCurve : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathCatmullRomCurve : public QQuickCurve
 {
     Q_OBJECT
 public:
     QQuickPathCatmullRomCurve(QObject *parent=0) : QQuickCurve(parent) {}
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathArc : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathArc : public QQuickCurve
 {
     Q_OBJECT
     Q_PROPERTY(qreal radiusX READ radiusX WRITE setRadiusX NOTIFY radiusXChanged)
     Q_PROPERTY(qreal radiusY READ radiusY WRITE setRadiusY NOTIFY radiusYChanged)
     Q_PROPERTY(bool useLargeArc READ useLargeArc WRITE setUseLargeArc NOTIFY useLargeArcChanged)
     Q_PROPERTY(ArcDirection direction READ direction WRITE setDirection NOTIFY directionChanged)
+    Q_PROPERTY(qreal xAxisRotation READ xAxisRotation WRITE setXAxisRotation NOTIFY xAxisRotationChanged REVISION 2)
 
 public:
     QQuickPathArc(QObject *parent=0)
-        : QQuickCurve(parent), _radiusX(0), _radiusY(0), _useLargeArc(false), _direction(Clockwise) {}
+        : QQuickCurve(parent), _radiusX(0), _radiusY(0), _useLargeArc(false), _direction(Clockwise), _xAxisRotation(0) {}
 
     enum ArcDirection { Clockwise, Counterclockwise };
     Q_ENUM(ArcDirection)
@@ -296,22 +311,27 @@ public:
     ArcDirection direction() const;
     void setDirection(ArcDirection direction);
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    qreal xAxisRotation() const;
+    void setXAxisRotation(qreal rotation);
+
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 
 Q_SIGNALS:
     void radiusXChanged();
     void radiusYChanged();
     void useLargeArcChanged();
     void directionChanged();
+    Q_REVISION(2) void xAxisRotationChanged();
 
 private:
     qreal _radiusX;
     qreal _radiusY;
     bool _useLargeArc;
     ArcDirection _direction;
+    qreal _xAxisRotation;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathSvg : public QQuickCurve
+class Q_QUICK_PRIVATE_EXPORT QQuickPathSvg : public QQuickCurve
 {
     Q_OBJECT
     Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
@@ -321,7 +341,7 @@ public:
     QString path() const;
     void setPath(const QString &path);
 
-    void addToPath(QPainterPath &path, const QQuickPathData &);
+    void addToPath(QPainterPath &path, const QQuickPathData &) override;
 
 Q_SIGNALS:
     void pathChanged();
@@ -330,7 +350,7 @@ private:
     QString _path;
 };
 
-class Q_AUTOTEST_EXPORT QQuickPathPercent : public QQuickPathElement
+class Q_QUICK_PRIVATE_EXPORT QQuickPathPercent : public QQuickPathElement
 {
     Q_OBJECT
     Q_PROPERTY(qreal value READ value WRITE setValue NOTIFY valueChanged)
@@ -359,7 +379,7 @@ struct QQuickCachedBezier
 };
 
 class QQuickPathPrivate;
-class Q_AUTOTEST_EXPORT QQuickPath : public QObject, public QQmlParserStatus
+class Q_QUICK_PRIVATE_EXPORT QQuickPath : public QObject, public QQmlParserStatus
 {
     Q_OBJECT
 
@@ -385,7 +405,6 @@ public:
     bool hasStartY() const;
 
     bool isClosed() const;
-    bool hasEnd() const;
 
     QPainterPath path() const;
     QStringList attributes() const;
@@ -400,8 +419,9 @@ Q_SIGNALS:
     void startYChanged();
 
 protected:
-    virtual void componentComplete();
-    virtual void classBegin();
+    QQuickPath(QQuickPathPrivate &dd, QObject *parent = nullptr);
+    void componentComplete() override;
+    void classBegin() override;
     void disconnectPathElements();
     void connectPathElements();
     void gatherAttributes();
@@ -454,6 +474,7 @@ QML_DECLARE_TYPE(QQuickPathElement)
 QML_DECLARE_TYPE(QQuickPathAttribute)
 QML_DECLARE_TYPE(QQuickCurve)
 QML_DECLARE_TYPE(QQuickPathLine)
+QML_DECLARE_TYPE(QQuickPathMove)
 QML_DECLARE_TYPE(QQuickPathQuad)
 QML_DECLARE_TYPE(QQuickPathCubic)
 QML_DECLARE_TYPE(QQuickPathCatmullRomCurve)

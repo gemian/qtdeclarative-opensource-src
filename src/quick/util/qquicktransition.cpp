@@ -106,10 +106,10 @@ public:
     QQuickTransitionManager *manager;
 
 protected:
-    virtual void updateState(QAbstractAnimationJob::State newState, QAbstractAnimationJob::State oldState);
+    void updateState(QAbstractAnimationJob::State newState, QAbstractAnimationJob::State oldState) override;
 };
 
-class QQuickTransitionPrivate : public QObjectPrivate, QAnimationJobChangeListener
+class QQuickTransitionPrivate : public QObjectPrivate
 {
     Q_DECLARE_PUBLIC(QQuickTransition)
 public:
@@ -120,11 +120,8 @@ public:
     {
     }
 
-    void removeStateChangeListener(QAbstractAnimationJob *anim)
-    {
-        if (anim)
-            anim->removeAnimationChangeListener(this, QAbstractAnimationJob::StateChange);
-    }
+    static QQuickTransitionPrivate *get(QQuickTransition *q) { return q->d_func(); }
+    void animationStateChanged(QAbstractAnimationJob::State newState);
 
     QString fromState;
     QString toState;
@@ -134,7 +131,6 @@ public:
     bool reversible;
     bool enabled;
 protected:
-    virtual void animationStateChanged(QAbstractAnimationJob *, QAbstractAnimationJob::State, QAbstractAnimationJob::State);
 
     static void append_animation(QQmlListProperty<QQuickAbstractAnimation> *list, QQuickAbstractAnimation *a);
     static int animation_count(QQmlListProperty<QQuickAbstractAnimation> *list);
@@ -171,7 +167,16 @@ void QQuickTransitionPrivate::clear_animations(QQmlListProperty<QQuickAbstractAn
     }
 }
 
-void QQuickTransitionPrivate::animationStateChanged(QAbstractAnimationJob *, QAbstractAnimationJob::State newState, QAbstractAnimationJob::State)
+void QQuickTransitionInstance::animationStateChanged(QAbstractAnimationJob *, QAbstractAnimationJob::State newState, QAbstractAnimationJob::State)
+{
+    if (!m_transition)
+        return;
+
+    QQuickTransitionPrivate *transition = QQuickTransitionPrivate::get(m_transition);
+    transition->animationStateChanged(newState);
+}
+
+void QQuickTransitionPrivate::animationStateChanged(QAbstractAnimationJob::State newState)
 {
     Q_Q(QQuickTransition);
 
@@ -197,15 +202,16 @@ void ParallelAnimationWrapper::updateState(QAbstractAnimationJob::State newState
     }
 }
 
-QQuickTransitionInstance::QQuickTransitionInstance(QQuickTransitionPrivate *transition, QAbstractAnimationJob *anim)
+QQuickTransitionInstance::QQuickTransitionInstance(QQuickTransition *transition, QAbstractAnimationJob *anim)
     : m_transition(transition)
     , m_anim(anim)
 {
+    anim->addAnimationChangeListener(this, QAbstractAnimationJob::StateChange);
 }
 
 QQuickTransitionInstance::~QQuickTransitionInstance()
 {
-    m_transition->removeStateChangeListener(m_anim);
+    removeStateChangeListener();
     delete m_anim;
 }
 
@@ -270,8 +276,7 @@ QQuickTransitionInstance *QQuickTransition::prepare(QQuickStateOperation::Action
 
     group->setDirection(d->reversed ? QAbstractAnimationJob::Backward : QAbstractAnimationJob::Forward);
 
-    group->addAnimationChangeListener(d, QAbstractAnimationJob::StateChange);
-    QQuickTransitionInstance *wrapper = new QQuickTransitionInstance(d, group);
+    QQuickTransitionInstance *wrapper = new QQuickTransitionInstance(this, group);
     return wrapper;
 }
 
@@ -457,3 +462,5 @@ QQmlListProperty<QQuickAbstractAnimation> QQuickTransition::animations()
 QT_END_NAMESPACE
 
 //#include <qquicktransition.moc>
+
+#include "moc_qquicktransition_p.cpp"

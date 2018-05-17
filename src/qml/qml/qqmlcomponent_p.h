@@ -71,7 +71,6 @@ QT_BEGIN_NAMESPACE
 
 class QQmlComponent;
 class QQmlEngine;
-class QQmlCompiledData;
 
 class QQmlComponentAttached;
 class Q_QML_PRIVATE_EXPORT QQmlComponentPrivate : public QObjectPrivate, public QQmlTypeData::TypeDataCallback
@@ -80,17 +79,25 @@ class Q_QML_PRIVATE_EXPORT QQmlComponentPrivate : public QObjectPrivate, public 
 
 public:
     QQmlComponentPrivate()
-        : typeData(0), progress(0.), start(-1), cc(0), engine(0), creationContext(0), depthIncreased(false) {}
+        : typeData(0), progress(0.), start(-1), engine(0), creationContext(0), depthIncreased(false) {}
 
     void loadUrl(const QUrl &newUrl, QQmlComponent::CompilationMode mode = QQmlComponent::PreferSynchronous);
 
     QObject *beginCreate(QQmlContextData *);
     void completeCreate();
     void initializeObjectWithInitialProperties(QV4::QmlContext *qmlContext, const QV4::Value &valuemap, QObject *toCreate);
+    static void setInitialProperties(QV4::ExecutionEngine *engine, QV4::QmlContext *qmlContext, const QV4::Value &o, const QV4::Value &v);
+
+    void incubateObject(
+            QQmlIncubator *incubationTask,
+            QQmlComponent *component,
+            QQmlEngine *engine,
+            QQmlContextData *context,
+            QQmlContextData *forContext);
 
     QQmlTypeData *typeData;
-    virtual void typeDataReady(QQmlTypeData *);
-    virtual void typeDataProgress(QQmlTypeData *, qreal);
+    void typeDataReady(QQmlTypeData *) override;
+    void typeDataProgress(QQmlTypeData *, qreal) override;
 
     void fromTypeData(QQmlTypeData *data);
 
@@ -98,7 +105,7 @@ public:
     qreal progress;
 
     int start;
-    QQmlCompiledData *cc;
+    QQmlRefPointer<QV4::CompiledData::CompilationUnit> compilationUnit;
 
     struct ConstructionState {
         ConstructionState()
@@ -114,8 +121,17 @@ public:
     };
     ConstructionState state;
 
-    static void beginDeferred(QQmlEnginePrivate *enginePriv, QObject *object,
-                              ConstructionState *state);
+    struct DeferredState {
+        ~DeferredState() {
+            qDeleteAll(constructionStates);
+            constructionStates.clear();
+        }
+        QVector<ConstructionState *> constructionStates;
+    };
+
+    static void beginDeferred(QQmlEnginePrivate *enginePriv, QObject *object, DeferredState* deferredState);
+    static void completeDeferred(QQmlEnginePrivate *enginePriv, DeferredState *deferredState);
+
     static void complete(QQmlEnginePrivate *enginePriv, ConstructionState *state);
 
     QQmlEngine *engine;

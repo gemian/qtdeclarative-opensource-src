@@ -53,17 +53,17 @@
 
 #include <private/qtqmlglobal_p.h>
 #include <private/qobject_p.h>
-
+#include <private/qqmlpropertyindex_p.h>
 #include <private/qv4value_p.h>
 #include <private/qv4persistent_p.h>
 #include <qjsengine.h>
+#include <qvector.h>
 
 QT_BEGIN_NAMESPACE
 
 template <class Key, class T> class QHash;
 class QQmlEngine;
 class QQmlGuardImpl;
-class QQmlCompiledData;
 class QQmlAbstractBinding;
 class QQmlBoundSignal;
 class QQmlContext;
@@ -72,6 +72,42 @@ class QQmlContextData;
 class QQmlNotifier;
 class QQmlDataExtended;
 class QQmlNotifierEndpoint;
+
+namespace QV4 {
+namespace CompiledData {
+struct CompilationUnit;
+struct Binding;
+}
+}
+
+// This is declared here because QQmlData below needs it and this file
+// in turn is included from qqmlcontext_p.h.
+class QQmlContextData;
+class Q_QML_PRIVATE_EXPORT QQmlContextDataRef
+{
+public:
+    inline QQmlContextDataRef();
+    inline QQmlContextDataRef(QQmlContextData *);
+    inline QQmlContextDataRef(const QQmlContextDataRef &);
+    inline ~QQmlContextDataRef();
+
+    inline QQmlContextData *contextData() const;
+    inline void setContextData(QQmlContextData *);
+
+    inline bool isNull() const { return !m_contextData; }
+
+    inline operator QQmlContextData*() const { return m_contextData; }
+    inline QQmlContextData* operator->() const { return m_contextData; }
+    inline QQmlContextDataRef &operator=(QQmlContextData *d);
+    inline QQmlContextDataRef &operator=(const QQmlContextDataRef &other);
+
+private:
+
+    inline void clear();
+
+    QQmlContextData *m_contextData;
+};
+
 // This class is structured in such a way, that simply zero'ing it is the
 // default state for elemental object allocations.  This is crucial in the
 // workings of the QQmlInstruction::CreateSimpleObject instruction.
@@ -108,7 +144,6 @@ public:
 
     quint32 ownedByQml1:1; // This bit is shared with QML1's QDeclarativeData.
     quint32 ownMemory:1;
-    quint32 ownContext:1;
     quint32 indestructible:1;
     quint32 explicitIndestructibleSet:1;
     quint32 hasTaintedV4Object:1;
@@ -121,15 +156,20 @@ public:
     quint32 hasInterceptorMetaObject:1;
     quint32 hasVMEMetaObject:1;
     quint32 parentFrozen:1;
-    quint32 dummy:21;
+    quint32 dummy:6;
 
-    // When bindingBitsSize < 32, we store the binding bit flags inside
-    // bindingBitsValue. When we need more than 32 bits, we allocated
+    // When bindingBitsSize < sizeof(ptr), we store the binding bit flags inside
+    // bindingBitsValue. When we need more than sizeof(ptr) bits, we allocated
     // sufficient space and use bindingBits to point to it.
-    int bindingBitsSize;
+    quint32 bindingBitsArraySize : 16;
+    typedef quintptr BindingBitsType;
+    enum {
+        BitsPerType = sizeof(BindingBitsType) * 8,
+        InlineBindingArraySize = 2
+    };
     union {
-        quint32 *bindingBits;
-        quint32 bindingBitsValue;
+        BindingBitsType *bindingBits;
+        BindingBitsType bindingBitsValue[InlineBindingArraySize];
     };
 
     struct NotifyList {
@@ -153,9 +193,10 @@ public:
     void disconnectNotifiers();
 
     // The context that created the C++ object
-    QQmlContextData *context;
+    QQmlContextData *context = 0;
     // The outermost context in which this object lives
-    QQmlContextData *outerContext;
+    QQmlContextData *outerContext = 0;
+    QQmlContextDataRef ownContext;
 
     QQmlAbstractBinding *bindings;
     QQmlBoundSignal *signalHandlers;
@@ -168,7 +209,7 @@ public:
     void clearBindingBit(int);
     void setBindingBit(QObject *obj, int);
 
-    inline bool hasPendingBindingBit(int) const;
+    inline bool hasPendingBindingBit(int index) const;
     void setPendingBindingBit(QObject *obj, int);
     void clearPendingBindingBit(int);
 
@@ -179,11 +220,15 @@ public:
 
     struct DeferredData {
         unsigned int deferredIdx;
-        QQmlCompiledData *compiledData;//Not always the same as the other compiledData
+        QMultiHash<int, const QV4::CompiledData::Binding *> bindings;
+        QV4::CompiledData::CompilationUnit *compilationUnit;//Not always the same as the other compilation unit
         QQmlContextData *context;//Could be either context or outerContext
     };
-    QQmlCompiledData *compiledData;
-    DeferredData *deferredData;
+    QV4::CompiledData::CompilationUnit *compilationUnit;
+    QVector<DeferredData *> deferredData;
+
+    void deferData(int objectIndex, QV4::CompiledData::CompilationUnit *, QQmlContextData *);
+    void releaseDeferredData();
 
     QV4::WeakValue jsWrapper;
 
@@ -193,14 +238,15 @@ public:
 
     static QQmlData *get(const QObject *object, bool create = false) {
         QObjectPrivate *priv = QObjectPrivate::get(const_cast<QObject *>(object));
-        if (priv->wasDeleted) {
+        // If QObjectData::isDeletingChildren is set then access to QObjectPrivate::declarativeData has
+        // to be avoided because QObjectPrivate::currentChildBeingDeleted is in use.
+        if (priv->isDeletingChildren || priv->wasDeleted) {
             Q_ASSERT(!create);
             return 0;
         } else if (priv->declarativeData) {
             return static_cast<QQmlData *>(priv->declarativeData);
         } else if (create) {
-            priv->declarativeData = new QQmlData;
-            return static_cast<QQmlData *>(priv->declarativeData);
+            return createQQmlData(priv);
         } else {
             return 0;
         }
@@ -216,33 +262,56 @@ public:
     bool hasExtendedData() const { return extendedData != 0; }
     QHash<int, QObject *> *attachedProperties() const;
 
-    static inline bool wasDeleted(QObject *);
+    static inline bool wasDeleted(const QObject *);
 
     static void markAsDeleted(QObject *);
     static void setQueuedForDeletion(QObject *);
 
-    static inline void flushPendingBinding(QObject *, int coreIndex);
+    static inline void flushPendingBinding(QObject *, QQmlPropertyIndex propertyIndex);
 
-    static QQmlPropertyCache *ensurePropertyCache(QJSEngine *engine, QObject *object);
+    static QQmlPropertyCache *ensurePropertyCache(QJSEngine *engine, QObject *object)
+    {
+        Q_ASSERT(engine);
+        QQmlData *ddata = QQmlData::get(object, /*create*/true);
+        if (Q_LIKELY(ddata->propertyCache))
+            return ddata->propertyCache;
+        return createPropertyCache(engine, object);
+    }
+
+    Q_ALWAYS_INLINE static uint offsetForBit(int bit) { return static_cast<uint>(bit) / BitsPerType; }
+    Q_ALWAYS_INLINE static BindingBitsType bitFlagForBit(int bit) { return BindingBitsType(1) << (static_cast<uint>(bit) & (BitsPerType - 1)); }
 
 private:
     // For attachedProperties
     mutable QQmlDataExtended *extendedData;
 
-    void flushPendingBindingImpl(int coreIndex);
+    Q_NEVER_INLINE static QQmlData *createQQmlData(QObjectPrivate *priv);
+    Q_NEVER_INLINE static QQmlPropertyCache *createPropertyCache(QJSEngine *engine, QObject *object);
+
+    void flushPendingBindingImpl(QQmlPropertyIndex index);
+
+    Q_ALWAYS_INLINE bool hasBitSet(int bit) const
+    {
+        uint offset = offsetForBit(bit);
+        if (bindingBitsArraySize <= offset)
+            return false;
+
+        const BindingBitsType *bits = (bindingBitsArraySize == InlineBindingArraySize) ? bindingBitsValue : bindingBits;
+        return bits[offset] & bitFlagForBit(bit);
+    }
 };
 
-bool QQmlData::wasDeleted(QObject *object)
+bool QQmlData::wasDeleted(const QObject *object)
 {
     if (!object)
         return true;
 
-    QObjectPrivate *priv = QObjectPrivate::get(object);
+    const QObjectPrivate *priv = QObjectPrivate::get(object);
     if (!priv || priv->wasDeleted)
         return true;
 
-    return priv->declarativeData &&
-           static_cast<QQmlData *>(priv->declarativeData)->isQueuedForDeletion;
+    const QQmlData *ddata = QQmlData::get(object);
+    return ddata && ddata->isQueuedForDeletion;
 }
 
 QQmlNotifierEndpoint *QQmlData::notify(int index)
@@ -275,27 +344,25 @@ inline bool QQmlData::signalHasEndpoint(int index) const
 
 bool QQmlData::hasBindingBit(int coreIndex) const
 {
-    int bit = coreIndex * 2;
+    Q_ASSERT(coreIndex >= 0);
+    Q_ASSERT(coreIndex <= 0xffff);
 
-    return bindingBitsSize > bit &&
-           ((bindingBitsSize == 32) ? (bindingBitsValue & (1 << bit)) :
-                                      (bindingBits[bit / 32] & (1 << (bit % 32))));
+    return hasBitSet(coreIndex * 2);
 }
 
 bool QQmlData::hasPendingBindingBit(int coreIndex) const
 {
-    int bit = coreIndex * 2 + 1;
+    Q_ASSERT(coreIndex >= 0);
+    Q_ASSERT(coreIndex <= 0xffff);
 
-    return bindingBitsSize > bit &&
-           ((bindingBitsSize == 32) ? (bindingBitsValue & (1 << bit)) :
-                                      (bindingBits[bit / 32] & (1 << (bit % 32))));
+    return hasBitSet(coreIndex * 2 + 1);
 }
 
-void QQmlData::flushPendingBinding(QObject *o, int coreIndex)
+void QQmlData::flushPendingBinding(QObject *o, QQmlPropertyIndex propertyIndex)
 {
     QQmlData *data = QQmlData::get(o, false);
-    if (data && data->hasPendingBindingBit(coreIndex))
-        data->flushPendingBindingImpl(coreIndex);
+    if (data && data->hasPendingBindingBit(propertyIndex.coreIndex()))
+        data->flushPendingBindingImpl(propertyIndex);
 }
 
 QT_END_NAMESPACE

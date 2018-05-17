@@ -59,7 +59,7 @@ void tst_qquickcustomaffector::test_basic()
     ensureAnimTime(600, system->m_animation);
 
     QVERIFY(extremelyFuzzyCompare(system->groupData[0]->size(), 500, 10));
-    foreach (QQuickParticleData *d, system->groupData[0]->data) {
+    for (QQuickParticleData *d : qAsConst(system->groupData[0]->data)) {
         if (d->t == -1)
             continue; //Particle data unused
         //in CI the whole simulation often happens at once, so dead particles end up missing out
@@ -92,22 +92,23 @@ void tst_qquickcustomaffector::test_move()
     ensureAnimTime(600, system->m_animation);
 
     QVERIFY(extremelyFuzzyCompare(system->groupData[0]->size(), 500, 10));
-    foreach (QQuickParticleData *d, system->groupData[0]->data) {
+    for (QQuickParticleData *d : qAsConst(system->groupData[0]->data)) {
         if (d->t == -1)
             continue; //Particle data unused
         if (!d->stillAlive(system))
             continue; //parameters no longer get set once you die
 
-        QVERIFY(myFuzzyCompare(d->curX(system), 50.0));
-        QVERIFY(myFuzzyCompare(d->curY(system), 50.0));
-        QVERIFY(myFuzzyCompare(d->curVX(system), 50.0));
-        QVERIFY(myFuzzyCompare(d->curVY(system), 50.0));
-        QVERIFY(myFuzzyCompare(d->curAX(), 50.0));
-        QVERIFY(myFuzzyCompare(d->curAY(), 50.0));
+        QVERIFY2(myFuzzyCompare(d->curX(system), 50.0), QByteArray::number(d->curX(system)));
+        QVERIFY2(myFuzzyCompare(d->curY(system), 50.0), QByteArray::number(d->curY(system)));
+        QVERIFY2(myFuzzyCompare(d->curVX(system), 50.0), QByteArray::number(d->curVX(system)));
+        QVERIFY2(myFuzzyCompare(d->curVY(system), 50.0), QByteArray::number(d->curVY(system)));
+        QVERIFY2(myFuzzyCompare(d->curAX(), 50.0), QByteArray::number(d->curAX()));
+        QVERIFY2(myFuzzyCompare(d->curAY(), 50.0), QByteArray::number(d->curAY()));
         QCOMPARE(d->lifeSpan, 0.5f);
         QCOMPARE(d->size, 32.f);
         QCOMPARE(d->endSize, 32.f);
-        QVERIFY(myFuzzyLEQ(d->t, ((qreal)system->timeInt/1000.0)));
+        QVERIFY2(myFuzzyLEQ(d->t, ((qreal)system->timeInt/1000.0)),
+                 QString::fromLatin1("%1 <= %2 / 1000").arg(d->t).arg(system->timeInt).toUtf8());
     }
     delete view;
 }

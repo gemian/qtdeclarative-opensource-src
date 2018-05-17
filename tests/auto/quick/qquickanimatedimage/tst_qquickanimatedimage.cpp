@@ -132,6 +132,16 @@ void tst_qquickanimatedimage::frameCount()
     QVERIFY(anim->isPlaying());
     QCOMPARE(anim->frameCount(), 3);
 
+    QSignalSpy frameCountChangedSpy(anim, &QQuickAnimatedImage::frameCountChanged);
+
+    const QUrl origSource = anim->source();
+    anim->setSource(QUrl());
+    QCOMPARE(anim->frameCount(), 0);
+    QCOMPARE(frameCountChangedSpy.count(), 1);
+    anim->setSource(origSource);
+    QCOMPARE(anim->frameCount(), 3);
+    QCOMPARE(frameCountChangedSpy.count(), 2);
+
     delete anim;
 }
 
@@ -179,7 +189,11 @@ void tst_qquickanimatedimage::mirror_running()
     QImage frame0_expected = frame0.transformed(transform);
     QImage frame1_expected = frame1.transformed(transform);
 
+    if (window.devicePixelRatio() != 1.0 && window.rendererInterface()->graphicsApi() == QSGRendererInterface::Software)
+        QSKIP("QTBUG-53823");
     QCOMPARE(frame0_flipped, frame0_expected);
+    if (window.devicePixelRatio() != 1.0 && window.rendererInterface()->graphicsApi() == QSGRendererInterface::Software)
+        QSKIP("QTBUG-53823");
     QCOMPARE(frame1_flipped, frame1_expected);
 
     delete anim;
@@ -212,6 +226,8 @@ void tst_qquickanimatedimage::mirror_notRunning()
     screenshot = window.grabWindow();
 
     screenshot.save("screen.png");
+    if (window.devicePixelRatio() != 1.0 && window.rendererInterface()->graphicsApi() == QSGRendererInterface::Software)
+        QSKIP("QTBUG-53823");
     QCOMPARE(screenshot, expected);
 
     // mirroring should not change the current frame or playing status

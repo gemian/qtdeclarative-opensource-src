@@ -37,6 +37,7 @@
 **
 ****************************************************************************/
 
+#include "qquickdesignercustomparserobject_p.h"
 #include "qquickdesignersupportmetainfo_p.h"
 #include "qqmldesignermetaobject_p.h"
 
@@ -52,8 +53,8 @@ bool QQuickDesignerSupportMetaInfo::isSubclassOf(QObject *object, const QByteArr
     const QMetaObject *metaObject = object->metaObject();
 
     while (metaObject) {
-         QQmlType *qmlType =  QQmlMetaType::qmlType(metaObject);
-         if (qmlType && qmlType->qmlTypeName() == QLatin1String(superTypeName)) // ignore version numbers
+         QQmlType qmlType =  QQmlMetaType::qmlType(metaObject);
+         if (qmlType.qmlTypeName() == QLatin1String(superTypeName)) // ignore version numbers
              return true;
 
          if (metaObject->className() == superTypeName)
@@ -68,6 +69,11 @@ bool QQuickDesignerSupportMetaInfo::isSubclassOf(QObject *object, const QByteArr
 void QQuickDesignerSupportMetaInfo::registerNotifyPropertyChangeCallBack(void (*callback)(QObject *, const QQuickDesignerSupport::PropertyName &))
 {
     QQmlDesignerMetaObject::registerNotifyPropertyChangeCallBack(callback);
+}
+
+void QQuickDesignerSupportMetaInfo::registerMockupObject(const char *uri, int versionMajor, int versionMinor, const char *qmlName)
+{
+    qmlRegisterCustomType<QQuickDesignerCustomParserObject>(uri, versionMajor, versionMinor, qmlName, new QQuickDesignerCustomParser);
 }
 
 QT_END_NAMESPACE

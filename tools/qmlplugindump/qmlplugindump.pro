@@ -1,4 +1,5 @@
 QT += qml qml-private quick-private core-private
+qtHaveModule(widgets): QT += widgets
 
 CONFIG += no_import_scan
 
@@ -20,5 +21,7 @@ macx {
     QMAKE_LFLAGS += -Wl,-sectcreate,__TEXT,__info_plist,$$shell_quote($$PWD/Info.plist)
     CONFIG -= app_bundle
 }
+
+QMAKE_TARGET_DESCRIPTION = QML Plugin Metadata Dumper
 
 load(qt_tool)

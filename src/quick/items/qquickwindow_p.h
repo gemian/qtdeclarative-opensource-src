@@ -53,6 +53,7 @@
 
 #include "qquickitem.h"
 #include "qquickwindow.h"
+#include "qquickevents_p_p.h"
 
 #include <QtQuick/private/qsgcontext_p.h>
 
@@ -65,16 +66,24 @@
 #include <qopenglcontext.h>
 #include <QtGui/qopenglframebufferobject.h>
 #include <QtGui/qevent.h>
+#include <QtGui/qstylehints.h>
+#include <QtGui/qguiapplication.h>
 
 QT_BEGIN_NAMESPACE
 
-//Make it easy to identify and customize the root item if needed
-
+class QOpenGLVertexArrayObjectHelper;
 class QQuickAnimatorController;
-class QSGRenderLoop;
-class QQuickRenderControl;
 class QQuickDragGrabber;
+class QQuickItemPrivate;
+class QQuickPointerDevice;
+class QQuickRenderControl;
+class QQuickWindowIncubationController;
+class QQuickWindowPrivate;
+class QQuickWindowRenderLoop;
+class QSGRenderLoop;
+class QTouchEvent;
 
+//Make it easy to identify and customize the root item if needed
 class QQuickRootItem : public QQuickItem
 {
     Q_OBJECT
@@ -84,15 +93,6 @@ public Q_SLOTS:
     void setWidth(int w) {QQuickItem::setWidth(qreal(w));}
     void setHeight(int h) {QQuickItem::setHeight(qreal(h));}
 };
-
-class QQuickItemPrivate;
-class QQuickWindowPrivate;
-
-class QTouchEvent;
-class QQuickWindowRenderLoop;
-class QQuickWindowIncubationController;
-
-class QOpenGLVertexArrayObjectHelper;
 
 class Q_QUICK_PRIVATE_EXPORT QQuickCustomRenderStage
 {
@@ -127,53 +127,73 @@ public:
     void deliverKeyEvent(QKeyEvent *e);
 
     // Keeps track of the item currently receiving mouse events
-    QQuickItem *mouseGrabberItem;
-#ifndef QT_NO_CURSOR
+#if QT_CONFIG(cursor)
     QQuickItem *cursorItem;
 #endif
-#ifndef QT_NO_DRAGANDDROP
+#if QT_CONFIG(draganddrop)
     QQuickDragGrabber *dragGrabber;
 #endif
     int touchMouseId;
+    QQuickPointerDevice *touchMouseDevice;
     bool checkIfDoubleClicked(ulong newPressEventTimestamp);
     ulong touchMousePressTimestamp;
 
     // Mouse positions are saved in widget coordinates
     QPointF lastMousePosition;
-    bool translateTouchToMouse(QQuickItem *item, QTouchEvent *event);
+    bool deliverTouchAsMouse(QQuickItem *item, QQuickPointerEvent *pointerEvent);
+    bool isDeliveringTouchAsMouse() const { return touchMouseId != -1 && touchMouseDevice; }
     void translateTouchEvent(QTouchEvent *touchEvent);
-    void setMouseGrabber(QQuickItem *grabber);
-    static void transformTouchPoints(QList<QTouchEvent::TouchPoint> &touchPoints, const QTransform &transform);
+    void grabTouchPoints(QObject *grabber, const QVector<int> &ids);
+    void removeGrabber(QQuickItem *grabber, bool mouse = true, bool touch = true);
+    void sendUngrabEvent(QQuickItem *grabber, bool touch);
     static QMouseEvent *cloneMouseEvent(QMouseEvent *event, QPointF *transformedLocalPos = 0);
-    bool deliverInitialMousePressEvent(QQuickItem *, QMouseEvent *);
-    bool deliverMouseEvent(QMouseEvent *);
-    bool sendFilteredMouseEvent(QQuickItem *, QQuickItem *, QEvent *, QSet<QQuickItem *> *);
-#ifndef QT_NO_WHEELEVENT
+    void deliverToPassiveGrabbers(const QVector<QPointer <QQuickPointerHandler> > &passiveGrabbers, QQuickPointerEvent *pointerEvent);
+    void deliverMouseEvent(QQuickPointerMouseEvent *pointerEvent);
+    bool sendFilteredMouseEvent(QEvent *event, QQuickItem *receiver, QQuickItem *filteringParent);
+    bool sendFilteredPointerEvent(QQuickPointerEvent *event, QQuickItem *receiver, QQuickItem *filteringParent = nullptr);
+    bool sendFilteredPointerEventImpl(QQuickPointerEvent *event, QQuickItem *receiver, QQuickItem *filteringParent);
+#if QT_CONFIG(wheelevent)
     bool deliverWheelEvent(QQuickItem *, QWheelEvent *);
 #endif
-#ifndef QT_NO_GESTURES
+#if QT_CONFIG(gestures)
     bool deliverNativeGestureEvent(QQuickItem *, QNativeGestureEvent *);
 #endif
-    bool deliverTouchPoints(QQuickItem *, QTouchEvent *, const QList<QTouchEvent::TouchPoint> &, QSet<int> *,
-                            QHash<QQuickItem *, QList<QTouchEvent::TouchPoint> > *, QSet<QQuickItem*> *filtered);
-    void deliverTouchEvent(QTouchEvent *);
-    void reallyDeliverTouchEvent(QTouchEvent *);
-    bool deliverTouchCancelEvent(QTouchEvent *);
+
+    // entry point of events to the window
+    void handleTouchEvent(QTouchEvent *);
+    void handleMouseEvent(QMouseEvent *);
+    bool compressTouchEvent(QTouchEvent *);
+    void flushFrameSynchronousEvents();
     void deliverDelayedTouchEvent();
-    void flushDelayedTouchEvent();
+
+    // the device-specific event instances which are reused during event delivery
+    mutable QVector<QQuickPointerEvent *> pointerEventInstances;
+    QQuickPointerEvent *queryPointerEventInstance(QQuickPointerDevice *device, QEvent::Type eventType = QEvent::None) const;
+    QQuickPointerEvent *pointerEventInstance(QQuickPointerDevice *device, QEvent::Type eventType = QEvent::None) const;
+
+    // delivery of pointer events:
+    QQuickPointerEvent *pointerEventInstance(QEvent *ev) const;
+    void deliverPointerEvent(QQuickPointerEvent *);
+    void deliverTouchEvent(QQuickPointerTouchEvent *);
+    bool deliverTouchCancelEvent(QTouchEvent *);
+    bool deliverPressOrReleaseEvent(QQuickPointerEvent *, bool handlersOnly = false);
+    void deliverUpdatedTouchPoints(QQuickPointerTouchEvent *event);
+    void deliverMatchingPointsToItem(QQuickItem *item, QQuickPointerEvent *pointerEvent, bool handlersOnly = false);
+
+    QVector<QQuickItem *> pointerTargets(QQuickItem *, const QPointF &, bool checkMouseButtons, bool checkAcceptsTouch) const;
+    QVector<QQuickItem *> mergePointerTargets(const QVector<QQuickItem *> &list1, const QVector<QQuickItem *> &list2) const;
+
+    // hover delivery
     bool deliverHoverEvent(QQuickItem *, const QPointF &scenePos, const QPointF &lastScenePos, Qt::KeyboardModifiers modifiers, ulong timestamp, bool &accepted);
-    bool deliverMatchingPointsToItem(QQuickItem *item, QTouchEvent *event, QSet<int> *acceptedNewPoints, const QSet<int> &matchingNewPoints, const QList<QTouchEvent::TouchPoint> &matchingPoints, QSet<QQuickItem*> *filtered);
-    QTouchEvent *touchEventForItemBounds(QQuickItem *target, const QTouchEvent &originalEvent);
-    QTouchEvent *touchEventWithPoints(const QTouchEvent &event, const QList<QTouchEvent::TouchPoint> &newPoints);
-    bool sendFilteredTouchEvent(QQuickItem *target, QQuickItem *item, QTouchEvent *event, QSet<QQuickItem*> *filtered);
     bool sendHoverEvent(QEvent::Type, QQuickItem *, const QPointF &scenePos, const QPointF &lastScenePos,
                         Qt::KeyboardModifiers modifiers, ulong timestamp, bool accepted);
     bool clearHover(ulong timestamp = 0);
-#ifndef QT_NO_DRAGANDDROP
+
+#if QT_CONFIG(draganddrop)
     void deliverDragEvent(QQuickDragGrabber *, QEvent *);
     bool deliverDragEvent(QQuickDragGrabber *, QQuickItem *, QDragMoveEvent *);
 #endif
-#ifndef QT_NO_CURSOR
+#if QT_CONFIG(cursor)
     void updateCursor(const QPointF &scenePos);
     QQuickItem *findCursorItem(QQuickItem *item, const QPointF &scenePos);
 #endif
@@ -188,7 +208,7 @@ public:
     void setFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = 0);
     void clearFocusInScope(QQuickItem *scope, QQuickItem *item, Qt::FocusReason reason, FocusOptions = 0);
     static void notifyFocusChangesRecur(QQuickItem **item, int remaining);
-    void clearFocusObject();
+    void clearFocusObject() override;
 
     void updateFocusItemTransform();
 
@@ -210,6 +230,8 @@ public:
     QList<QSGNode *> cleanupNodeList;
 
     QVector<QQuickItem *> itemsToPolish;
+    QVector<QQuickItem *> hasFiltered; // during event delivery to a single receiver, the filtering parents for which childMouseEventFilter was already called
+    QVector<QQuickItem *> skipDelivery; // during delivery of one event to all receivers, Items to which we know delivery is no longer necessary
 
     qreal devicePixelRatio;
     QMetaObject::Connection physicalDpiChangedConnection;
@@ -233,7 +255,8 @@ public:
     QQuickRenderControl *renderControl;
     QQuickAnimatorController *animationController;
     QScopedPointer<QTouchEvent> delayedTouch;
-    int touchRecursionGuard;
+
+    int pointerEventRecursionGuard;
     QQuickCustomRenderStage *customRenderStage;
 
     QColor clearColor;
@@ -246,6 +269,9 @@ public:
     uint lastWheelEventAccepted : 1;
     bool componentCompleted : 1;
 
+    bool allowChildEventFiltering : 1;
+    bool allowDoubleClick : 1;
+
     Qt::FocusReason lastFocusReason;
 
     QOpenGLFramebufferObject *renderTarget;
@@ -254,15 +280,33 @@ public:
 
     QOpenGLVertexArrayObjectHelper *vaoHelper;
 
-    // Keeps track of which touch point (int) was last accepted by which item
-    QHash<int, QQuickItem *> itemForTouchPointId;
-    QSet<int> touchMouseIdCandidates;
-
     mutable QQuickWindowIncubationController *incubationController;
 
     static bool defaultAlphaBuffer;
+    static QQuickWindow::TextRenderType textRenderType;
 
     static bool dragOverThreshold(qreal d, Qt::Axis axis, QMouseEvent *event, int startDragThreshold = -1);
+
+    template <typename TEventPoint>
+    static bool dragOverThreshold(qreal d, Qt::Axis axis, const TEventPoint *p, int startDragThreshold = -1)
+    {
+        QStyleHints *styleHints = qApp->styleHints();
+        bool overThreshold = qAbs(d) > (startDragThreshold >= 0 ? startDragThreshold : styleHints->startDragDistance());
+        const bool dragVelocityLimitAvailable = (styleHints->startDragVelocity() > 0);
+        if (!overThreshold && dragVelocityLimitAvailable) {
+            qreal velocity = axis == Qt::XAxis ? p->velocity().x() : p->velocity().y();
+            overThreshold |= qAbs(velocity) > styleHints->startDragVelocity();
+        }
+        return overThreshold;
+    }
+
+    static bool dragOverThreshold(const QQuickEventPoint *point)
+    {
+        QPointF delta = point->scenePosition() - point->scenePressPosition();
+        return (QQuickWindowPrivate::dragOverThreshold(delta.x(), Qt::XAxis, point) ||
+                QQuickWindowPrivate::dragOverThreshold(delta.y(), Qt::YAxis, point));
+    }
+
 
     // data property
     static void data_append(QQmlListProperty<QObject> *, QObject *);
@@ -288,22 +332,6 @@ private:
     static void cleanupNodesOnShutdown(QQuickItem *);
 };
 
-class Q_QUICK_PRIVATE_EXPORT QQuickCloseEvent : public QObject
-{
-    Q_OBJECT
-    Q_PROPERTY(bool accepted READ isAccepted WRITE setAccepted)
-
-public:
-    QQuickCloseEvent()
-        : _accepted(true) {}
-
-    bool isAccepted() { return _accepted; }
-    void setAccepted(bool accepted) { _accepted = accepted; }
-
-private:
-    bool _accepted;
-};
-
 class QQuickWindowQObjectCleanupJob : public QRunnable
 {
 public:
@@ -320,7 +348,5 @@ public:
 Q_DECLARE_OPERATORS_FOR_FLAGS(QQuickWindowPrivate::FocusOptions)
 
 QT_END_NAMESPACE
-
-QML_DECLARE_TYPE(QQuickCloseEvent)
 
 #endif // QQUICKWINDOW_P_H

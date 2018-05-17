@@ -51,12 +51,13 @@
 // We mean it.
 //
 
+#include <QtQuick/private/qtquickglobal_p.h>
+
+QT_REQUIRE_CONFIG(quick_positioners);
+
 #include "qquickpositioners_p.h"
 #include "qquickimplicitsizeitem_p_p.h"
 
-#include <QtQuick/private/qquickstate_p.h>
-#include <private/qquicktransitionmanager_p_p.h>
-#include <private/qquickstatechangescript_p.h>
 #include <private/qlazilyallocated_p.h>
 
 #include <QtCore/qobject.h>
@@ -137,9 +138,9 @@ public:
         setPositioningDirty();
     }
 
-    void itemGeometryChanged(QQuickItem *, const QRectF &newGeometry, const QRectF &oldGeometry) Q_DECL_OVERRIDE
+    void itemGeometryChanged(QQuickItem *, QQuickGeometryChange change, const QRectF &) Q_DECL_OVERRIDE
     {
-        if (newGeometry.size() != oldGeometry.size())
+        if (change.sizeChange())
             setPositioningDirty();
     }
 

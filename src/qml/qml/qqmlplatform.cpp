@@ -38,6 +38,7 @@
 ****************************************************************************/
 
 #include "qqmlplatform_p.h"
+#include "qqmlglobal_p.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -59,24 +60,20 @@ QString QQmlPlatform::os()
 {
 #if defined(Q_OS_ANDROID)
     return QStringLiteral("android");
-#elif defined(Q_OS_BLACKBERRY)
-    return QStringLiteral("blackberry");
 #elif defined(Q_OS_IOS)
     return QStringLiteral("ios");
 #elif defined(Q_OS_TVOS)
     return QStringLiteral("tvos");
 #elif defined(Q_OS_MAC)
     return QStringLiteral("osx");
-#elif defined(Q_OS_WINCE)
-    return QStringLiteral("wince");
-#elif defined(Q_OS_WINPHONE)
-    return QStringLiteral("winphone");
 #elif defined(Q_OS_WINRT)
     return QStringLiteral("winrt");
 #elif defined(Q_OS_WIN)
     return QStringLiteral("windows");
 #elif defined(Q_OS_LINUX)
     return QStringLiteral("linux");
+#elif defined(Q_OS_QNX)
+    return QStringLiteral("qnx");
 #elif defined(Q_OS_UNIX)
     return QStringLiteral("unix");
 #else
@@ -84,4 +81,11 @@ QString QQmlPlatform::os()
 #endif
 }
 
+QString QQmlPlatform::pluginName() const
+{
+    return QQml_guiProvider()->pluginName();
+}
+
 QT_END_NAMESPACE
+
+#include "moc_qqmlplatform_p.cpp"

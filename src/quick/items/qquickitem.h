@@ -148,13 +148,12 @@ class Q_QUICK_EXPORT QQuickItem : public QObject, public QQmlParserStatus
     Q_PRIVATE_PROPERTY(QQuickItem::d_func(), QQuickItemLayer *layer READ layer DESIGNABLE false CONSTANT FINAL)
 
     Q_CLASSINFO("DefaultProperty", "data")
-    Q_CLASSINFO("qt_HasQmlAccessors", "true")
     Q_CLASSINFO("qt_QmlJSWrapperFactoryMethod", "_q_createJSWrapper(QV4::ExecutionEngine*)")
 
 public:
     enum Flag {
         ItemClipsChildrenToShape  = 0x01,
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
         ItemAcceptsInputMethod    = 0x02,
 #endif
         ItemIsFocusScope          = 0x04,
@@ -174,7 +173,8 @@ public:
         ItemActiveFocusHasChanged, // value.boolValue
         ItemRotationHasChanged,    // value.realValue
         ItemAntialiasingHasChanged, // value.boolValue
-        ItemDevicePixelRatioHasChanged // value.realValue
+        ItemDevicePixelRatioHasChanged, // value.realValue
+        ItemEnabledHasChanged      // value.boolValue
     };
 
     union ItemChangeData {
@@ -238,6 +238,7 @@ public:
     void setImplicitHeight(qreal);
     qreal implicitHeight() const;
 
+    QSizeF size() const;
     void setSize(const QSizeF &size);
 
     TransformOrigin transformOrigin() const;
@@ -292,8 +293,10 @@ public:
     void setAcceptedMouseButtons(Qt::MouseButtons buttons);
     bool acceptHoverEvents() const;
     void setAcceptHoverEvents(bool enabled);
+    bool acceptTouchEvents() const;
+    void setAcceptTouchEvents(bool accept);
 
-#ifndef QT_NO_CURSOR
+#if QT_CONFIG(cursor)
     QCursor cursor() const;
     void setCursor(const QCursor &cursor);
     void unsetCursor();
@@ -321,12 +324,12 @@ public:
     QTransform itemTransform(QQuickItem *, bool *) const;
     QPointF mapToItem(const QQuickItem *item, const QPointF &point) const;
     QPointF mapToScene(const QPointF &point) const;
-    Q_REVISION(7) Q_INVOKABLE QPointF mapToGlobal(const QPointF &point) const;
+    QPointF mapToGlobal(const QPointF &point) const;
     QRectF mapRectToItem(const QQuickItem *item, const QRectF &rect) const;
     QRectF mapRectToScene(const QRectF &rect) const;
     QPointF mapFromItem(const QQuickItem *item, const QPointF &point) const;
     QPointF mapFromScene(const QPointF &point) const;
-    Q_REVISION(7) Q_INVOKABLE QPointF mapFromGlobal(const QPointF &point) const;
+    QPointF mapFromGlobal(const QPointF &point) const;
     QRectF mapRectFromItem(const QQuickItem *item, const QRectF &rect) const;
     QRectF mapRectFromScene(const QRectF &rect) const;
 
@@ -334,12 +337,14 @@ public:
 
     Q_INVOKABLE void mapFromItem(QQmlV4Function*) const;
     Q_INVOKABLE void mapToItem(QQmlV4Function*) const;
+    Q_REVISION(7) Q_INVOKABLE void mapFromGlobal(QQmlV4Function*) const;
+    Q_REVISION(7) Q_INVOKABLE void mapToGlobal(QQmlV4Function*) const;
     Q_INVOKABLE void forceActiveFocus();
     Q_INVOKABLE void forceActiveFocus(Qt::FocusReason reason);
     Q_REVISION(1) Q_INVOKABLE QQuickItem *nextItemInFocusChain(bool forward = true);
     Q_INVOKABLE QQuickItem *childAt(qreal x, qreal y) const;
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     virtual QVariant inputMethodQuery(Qt::InputMethodQuery query) const;
 #endif
 
@@ -370,7 +375,6 @@ Q_SIGNALS:
     void clipChanged(bool);
     Q_REVISION(1) void windowChanged(QQuickWindow* window);
 
-    // XXX todo
     void childrenChanged();
     void opacityChanged();
     void enabledChanged();
@@ -393,7 +397,7 @@ protected:
     bool isComponentComplete() const;
     virtual void itemChange(ItemChange, const ItemChangeData &);
 
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     void updateInputMethod(Qt::InputMethodQueries queries = Qt::ImQueryInput);
 #endif
 
@@ -406,7 +410,7 @@ protected:
 
     virtual void keyPressEvent(QKeyEvent *event);
     virtual void keyReleaseEvent(QKeyEvent *event);
-#ifndef QT_NO_IM
+#if QT_CONFIG(im)
     virtual void inputMethodEvent(QInputMethodEvent *);
 #endif
     virtual void focusInEvent(QFocusEvent *);
@@ -417,14 +421,14 @@ protected:
     virtual void mouseDoubleClickEvent(QMouseEvent *event);
     virtual void mouseUngrabEvent(); // XXX todo - params?
     virtual void touchUngrabEvent();
-#ifndef QT_NO_WHEELEVENT
+#if QT_CONFIG(wheelevent)
     virtual void wheelEvent(QWheelEvent *event);
 #endif
     virtual void touchEvent(QTouchEvent *event);
     virtual void hoverEnterEvent(QHoverEvent *event);
     virtual void hoverMoveEvent(QHoverEvent *event);
     virtual void hoverLeaveEvent(QHoverEvent *event);
-#ifndef QT_NO_DRAGANDDROP
+#if QT_CONFIG(draganddrop)
     virtual void dragEnterEvent(QDragEnterEvent *);
     virtual void dragMoveEvent(QDragMoveEvent *);
     virtual void dragLeaveEvent(QDragLeaveEvent *);
@@ -447,6 +451,7 @@ private:
     Q_PRIVATE_SLOT(d_func(), void _q_resourceObjectDeleted(QObject *))
     Q_PRIVATE_SLOT(d_func(), quint64 _q_createJSWrapper(QV4::ExecutionEngine *))
 
+    friend class QQuickEventPoint;
     friend class QQuickWindow;
     friend class QQuickWindowPrivate;
     friend class QSGRenderer;
@@ -456,7 +461,6 @@ private:
     Q_DECLARE_PRIVATE(QQuickItem)
 };
 
-// XXX todo
 Q_DECLARE_OPERATORS_FOR_FLAGS(QQuickItem::Flags)
 
 #ifndef QT_NO_DEBUG_STREAM

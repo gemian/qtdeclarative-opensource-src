@@ -65,27 +65,37 @@ namespace QV4 {
 
 namespace Heap {
 
-struct QmlTypeWrapper : Object {
+struct QQmlTypeWrapper : Object {
     enum TypeNameMode {
         IncludeEnums,
         ExcludeEnums
     };
 
-    QmlTypeWrapper();
-    ~QmlTypeWrapper();
+    void init();
+    void destroy();
     TypeNameMode mode;
-    QPointer<QObject> object;
+    QQmlQPointer<QObject> object;
 
-    QQmlType *type;
+    QQmlType type() const;
+
+    QQmlTypePrivate *typePrivate;
     QQmlTypeNameCache *typeNamespace;
-    const void *importNamespace;
+    const QQmlImportRef *importNamespace;
+};
+
+struct QQmlScopedEnumWrapper : Object {
+    void init() { Object::init(); }
+    void destroy();
+    int scopeEnumIndex;
+    QQmlTypePrivate *typePrivate;
+    QQmlType type() const;
 };
 
 }
 
-struct Q_QML_EXPORT QmlTypeWrapper : Object
+struct Q_QML_EXPORT QQmlTypeWrapper : Object
 {
-    V4_OBJECT2(QmlTypeWrapper, Object)
+    V4_OBJECT2(QQmlTypeWrapper, Object)
     V4_NEEDS_DESTROY
 
     bool isSingleton() const;
@@ -93,17 +103,25 @@ struct Q_QML_EXPORT QmlTypeWrapper : Object
 
     QVariant toVariant() const;
 
-    static ReturnedValue create(ExecutionEngine *, QObject *, QQmlType *,
-                                Heap::QmlTypeWrapper::TypeNameMode = Heap::QmlTypeWrapper::IncludeEnums);
-    static ReturnedValue create(ExecutionEngine *, QObject *, QQmlTypeNameCache *, const void *,
-                                Heap::QmlTypeWrapper::TypeNameMode = Heap::QmlTypeWrapper::IncludeEnums);
+    static ReturnedValue create(ExecutionEngine *, QObject *, const QQmlType &,
+                                Heap::QQmlTypeWrapper::TypeNameMode = Heap::QQmlTypeWrapper::IncludeEnums);
+    static ReturnedValue create(ExecutionEngine *, QObject *, QQmlTypeNameCache *, const QQmlImportRef *,
+                                Heap::QQmlTypeWrapper::TypeNameMode = Heap::QQmlTypeWrapper::IncludeEnums);
 
 
     static ReturnedValue get(const Managed *m, String *name, bool *hasProperty);
-    static void put(Managed *m, String *name, const Value &value);
+    static bool put(Managed *m, String *name, const Value &value);
     static PropertyAttributes query(const Managed *, String *name);
     static bool isEqualTo(Managed *that, Managed *o);
+    static ReturnedValue instanceOf(const Object *typeObject, const Value &var);
+};
 
+struct Q_QML_EXPORT QQmlScopedEnumWrapper : Object
+{
+    V4_OBJECT2(QQmlScopedEnumWrapper, Object)
+    V4_NEEDS_DESTROY
+
+    static ReturnedValue get(const Managed *m, String *name, bool *hasProperty);
 };
 
 }

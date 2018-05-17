@@ -52,6 +52,7 @@
 //
 
 #include <private/qtqmlglobal_p.h>
+#include <private/qqmlincubator_p.h>
 #include <QtQml/qqml.h>
 #include <QtCore/qobject.h>
 
@@ -74,11 +75,13 @@ public:
 
     virtual int count() const = 0;
     virtual bool isValid() const = 0;
-    virtual QObject *object(int index, bool asynchronous=false) = 0;
+    QObject *object(int index, bool async) { return object(index, async ? QQmlIncubator::Asynchronous : QQmlIncubator::AsynchronousIfNested); }
+    virtual QObject *object(int index, QQmlIncubator::IncubationMode incubationMode = QQmlIncubator::AsynchronousIfNested) = 0;
     virtual ReleaseFlags release(QObject *object) = 0;
     virtual void cancel(int) {}
     virtual QString stringValue(int, const QString &) = 0;
     virtual void setWatchedRoles(const QList<QByteArray> &roles) = 0;
+    virtual QQmlIncubator::Status incubationStatus(int index) = 0;
 
     virtual int indexOf(QObject *object, QObject *objectContext) const = 0;
 
@@ -109,16 +112,17 @@ class Q_QML_PRIVATE_EXPORT QQmlObjectModel : public QQmlInstanceModel
 
 public:
     QQmlObjectModel(QObject *parent=0);
-    virtual ~QQmlObjectModel() {}
+    ~QQmlObjectModel() {}
 
-    virtual int count() const;
-    virtual bool isValid() const;
-    virtual QObject *object(int index, bool asynchronous=false);
-    virtual ReleaseFlags release(QObject *object);
-    virtual QString stringValue(int index, const QString &role);
-    virtual void setWatchedRoles(const QList<QByteArray> &) {}
+    int count() const override;
+    bool isValid() const override;
+    QObject *object(int index, QQmlIncubator::IncubationMode incubationMode = QQmlIncubator::AsynchronousIfNested) override;
+    ReleaseFlags release(QObject *object) override;
+    QString stringValue(int index, const QString &role) override;
+    void setWatchedRoles(const QList<QByteArray> &) override {}
+    QQmlIncubator::Status incubationStatus(int index) override;
 
-    virtual int indexOf(QObject *object, QObject *objectContext) const;
+    int indexOf(QObject *object, QObject *objectContext) const override;
 
     QQmlListProperty<QObject> children();
 

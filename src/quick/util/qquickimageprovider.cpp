@@ -44,13 +44,6 @@
 
 QT_BEGIN_NAMESPACE
 
-class QQuickImageProviderPrivate
-{
-public:
-    QQuickImageProvider::ImageType type;
-    QQuickImageProvider::Flags flags;
-};
-
 /*!
     \class QQuickTextureFactory
     \since 5.0
@@ -158,6 +151,8 @@ QQuickTextureFactory *QQuickTextureFactory::textureFactoryForImage(const QImage 
     If you are using QRunnable as base for your QQuickImageResponse
     ensure automatic deletion is disabled.
 
+    See the \l {imageresponseprovider}{Image Response Provider Example} for a complete implementation.
+
     \sa QQuickImageProvider
 */
 
@@ -188,7 +183,12 @@ QString QQuickImageResponse::errorString() const
 
     It may be reimplemented to cancel a request in the provider side, however, it is not mandatory.
 
-    A cancelled QQuickImageResponse still needs to emit finished().
+    A cancelled QQuickImageResponse still needs to emit finished() so that the
+    engine may clean up the QQuickImageResponse.
+
+    \note finished() should not be emitted until the response is complete,
+    regardless of whether or not cancel() was called. If it is called prematurely,
+    the engine may destroy the response while it is still active, leading to a crash.
 */
 void QQuickImageResponse::cancel()
 {
@@ -197,7 +197,12 @@ void QQuickImageResponse::cancel()
 /*!
     \fn void QQuickImageResponse::finished()
 
-    Signals that the job execution has finished (be it successfully, because an error happened or because it was cancelled).
+    Signals that the job execution has finished (be it successfully, because an
+    error happened or because it was cancelled).
+
+    \note Emission of this signal must be the final action the response performs:
+    once the signal is received, the response will subsequently be destroyed by
+    the engine.
  */
 
 /*!
@@ -250,7 +255,7 @@ void QQuickImageResponse::cancel()
     If you want the rest of the URL to be case insensitive, you will have to take care
     of that yourself inside your image provider.
 
-    \section2 An example
+    \section2 An Example
 
     Here are two images. Their \c source values indicate they should be loaded by
     an image provider named "colors", and the images to be loaded are "yellow"
@@ -296,7 +301,7 @@ void QQuickImageResponse::cancel()
     instead of registering it in the application \c main() function as shown above.
 
 
-    \section2 Asynchronous image loading
+    \section2 Asynchronous Image Loading
 
     Image providers that support QImage or Texture loading automatically include support
     for asychronous loading of images. To enable asynchronous loading for an
@@ -325,7 +330,7 @@ void QQuickImageResponse::cancel()
     See the \l {imageresponseprovider}{Image Response Provider Example} for a complete implementation.
 
 
-    \section2 Image caching
+    \section2 Image Caching
 
     Images returned by a QQuickImageProvider are automatically cached,
     similar to any image loaded by the QML engine. When an image with a
@@ -349,6 +354,7 @@ QQuickImageProvider::QQuickImageProvider(ImageType type, Flags flags)
 {
     d->type = type;
     d->flags = flags;
+    d->isProviderWithOptions = false;
 }
 
 /*!
@@ -472,6 +478,8 @@ QQuickTextureFactory *QQuickImageProvider::requestTexture(const QString &id, QSi
     \inmodule QtQuick
     \brief The QQuickAsyncImageProvider class provides an interface for for asynchronous control of QML image requests.
 
+    See the \l {imageresponseprovider}{Image Response Provider Example} for a complete implementation.
+
     \sa QQuickImageProvider
 */
 QQuickAsyncImageProvider::QQuickAsyncImageProvider()
@@ -502,26 +510,211 @@ QQuickAsyncImageProvider::~QQuickAsyncImageProvider()
     implementation of this method is reentrant.
 */
 
-/*!
-   \fn QImage QQuickImageProvider::requestImage(const QString &id, QSize *size, const QSize& requestedSize, bool requestedAutoTransform);
 
-   \internal
-   For future reference.
+class QQuickImageProviderOptionsPrivate : public QSharedData
+{
+public:
+    QQuickImageProviderOptionsPrivate()
+     : autoTransform(QQuickImageProviderOptions::UsePluginDefaultTransform)
+     , preserveAspectRatioCrop(false)
+     , preserveAspectRatioFit(false)
+    {
+    }
+
+    QQuickImageProviderOptions::AutoTransform autoTransform;
+    bool preserveAspectRatioCrop;
+    bool preserveAspectRatioFit;
+};
+
+/*!
+    \class QQuickImageProviderOptions
+    \brief The QQuickImageProviderOptions class provides options for QQuickImageProviderWithOptions image requests.
+    \inmodule QtQuick
+    \internal
+
+    \sa QQuickImageProviderWithOptions
 */
 
 /*!
-   \fn QPixmap QQuickImageProvider::requestPixmap(const QString &id, QSize *size, const QSize& requestedSize, bool requestedAutoTransform);
+    \enum QQuickImageProviderOptions::AutoTransform
 
-   \internal
-   For future reference.
+    Whether the image provider should apply transformation metadata on read().
+
+    \value UsePluginDefaultTransform Image provider should do its default behavior on whether applying transformation metadata on read or not
+    \value ApplyTransform Image provider should apply transformation metadata on read
+    \value DoNotApplyTransform Image provider should not apply transformation metadata on read
 */
+
+QQuickImageProviderOptions::QQuickImageProviderOptions()
+ : d(new QQuickImageProviderOptionsPrivate())
+{
+}
+
+QQuickImageProviderOptions::~QQuickImageProviderOptions()
+{
+}
+
+QQuickImageProviderOptions::QQuickImageProviderOptions(const QQuickImageProviderOptions &other)
+ : d(other.d)
+{
+}
+
+QQuickImageProviderOptions& QQuickImageProviderOptions::operator=(const QQuickImageProviderOptions &other)
+{
+    d = other.d;
+    return *this;
+}
+
+bool QQuickImageProviderOptions::operator==(const QQuickImageProviderOptions &other) const
+{
+    return d->autoTransform == other.d->autoTransform &&
+           d->preserveAspectRatioCrop == other.d->preserveAspectRatioCrop &&
+           d->preserveAspectRatioFit == other.d->preserveAspectRatioFit;
+}
 
 /*!
-   \fn QQuickTextureFactory *QQuickImageProvider::requestTexture(const QString &id, QSize *size, const QSize &requestedSize, bool requestedAutoTransform);
-
-   \internal
-   For future reference.
+    Returns whether the image provider should apply transformation metadata on read().
 */
+QQuickImageProviderOptions::AutoTransform QQuickImageProviderOptions::autoTransform() const
+{
+    return d->autoTransform;
+}
+
+void QQuickImageProviderOptions::setAutoTransform(QQuickImageProviderOptions::AutoTransform autoTransform)
+{
+    d->autoTransform = autoTransform;
+}
+
+/*!
+    Returns whether the image request is for a PreserveAspectCrop Image.
+    This allows the provider to better optimize the size of the returned image.
+*/
+bool QQuickImageProviderOptions::preserveAspectRatioCrop() const
+{
+    return d->preserveAspectRatioCrop;
+}
+
+void QQuickImageProviderOptions::setPreserveAspectRatioCrop(bool preserveAspectRatioCrop)
+{
+    d->preserveAspectRatioCrop = preserveAspectRatioCrop;
+}
+
+/*!
+    Returns whether the image request is for a PreserveAspectFit Image.
+    This allows the provider to better optimize the size of the returned image.
+*/
+bool QQuickImageProviderOptions::preserveAspectRatioFit() const
+{
+    return d->preserveAspectRatioFit;
+}
+
+void QQuickImageProviderOptions::setPreserveAspectRatioFit(bool preserveAspectRatioFit)
+{
+    d->preserveAspectRatioFit = preserveAspectRatioFit;
+}
+
+QQuickImageProviderWithOptions::QQuickImageProviderWithOptions(ImageType type, Flags flags)
+ : QQuickAsyncImageProvider()
+{
+    QQuickImageProvider::d->type = type;
+    QQuickImageProvider::d->flags = flags;
+    QQuickImageProvider::d->isProviderWithOptions = true;
+}
+
+QImage QQuickImageProviderWithOptions::requestImage(const QString &id, QSize *size, const QSize& requestedSize)
+{
+    return requestImage(id, size, requestedSize, QQuickImageProviderOptions());
+}
+
+QPixmap QQuickImageProviderWithOptions::requestPixmap(const QString &id, QSize *size, const QSize& requestedSize)
+{
+    return requestPixmap(id, size, requestedSize, QQuickImageProviderOptions());
+}
+
+QQuickTextureFactory *QQuickImageProviderWithOptions::requestTexture(const QString &id, QSize *size, const QSize &requestedSize)
+{
+    return requestTexture(id, size, requestedSize, QQuickImageProviderOptions());
+}
+
+QImage QQuickImageProviderWithOptions::requestImage(const QString &id, QSize *size, const QSize& requestedSize, const QQuickImageProviderOptions &options)
+{
+    Q_UNUSED(options);
+    return QQuickAsyncImageProvider::requestImage(id, size, requestedSize);
+}
+
+QPixmap QQuickImageProviderWithOptions::requestPixmap(const QString &id, QSize *size, const QSize& requestedSize, const QQuickImageProviderOptions &options)
+{
+    Q_UNUSED(options);
+    return QQuickAsyncImageProvider::requestPixmap(id, size, requestedSize);
+}
+
+QQuickTextureFactory *QQuickImageProviderWithOptions::requestTexture(const QString &id, QSize *size, const QSize &requestedSize, const QQuickImageProviderOptions &options)
+{
+    Q_UNUSED(options);
+    return QQuickAsyncImageProvider::requestTexture(id, size, requestedSize);
+}
+
+QQuickImageResponse *QQuickImageProviderWithOptions::requestImageResponse(const QString &id, const QSize &requestedSize)
+{
+    Q_UNUSED(id);
+    Q_UNUSED(requestedSize);
+    if (imageType() == ImageResponse)
+        qWarning("ImageProvider is of ImageResponse type but has not implemented requestImageResponse()");
+    return nullptr;
+}
+
+QQuickImageResponse *QQuickImageProviderWithOptions::requestImageResponse(const QString &id, const QSize &requestedSize, const QQuickImageProviderOptions &options)
+{
+    Q_UNUSED(options);
+    return requestImageResponse(id, requestedSize);
+}
+
+/*!
+    Returns the recommended scaled image size for loading and storage. This is
+    calculated according to the native pixel size of the image \a originalSize,
+    the requested sourceSize \a requestedSize, the image file format \a format,
+    and \a options. If the calculation otherwise concludes that scaled loading
+    is not recommended, an invalid size is returned.
+*/
+QSize QQuickImageProviderWithOptions::loadSize(const QSize &originalSize, const QSize &requestedSize, const QByteArray &format, const QQuickImageProviderOptions &options)
+{
+    QSize res;
+    if ((requestedSize.width() <= 0 && requestedSize.height() <= 0) || originalSize.isEmpty())
+        return res;
+
+    const bool preserveAspectCropOrFit = options.preserveAspectRatioCrop() || options.preserveAspectRatioFit();
+
+    if (!preserveAspectCropOrFit && (format == "svg" || format == "svgz"))
+        return requestedSize;
+
+    qreal ratio = 0.0;
+    if (requestedSize.width() && (preserveAspectCropOrFit || requestedSize.width() < originalSize.width())) {
+        ratio = qreal(requestedSize.width()) / originalSize.width();
+    }
+    if (requestedSize.height() && (preserveAspectCropOrFit || requestedSize.height() < originalSize.height())) {
+        qreal hr = qreal(requestedSize.height()) / originalSize.height();
+        if (ratio == 0.0)
+            ratio = hr;
+        else if (!preserveAspectCropOrFit && (hr < ratio))
+            ratio = hr;
+        else if (preserveAspectCropOrFit && (hr > ratio))
+            ratio = hr;
+    }
+    if (ratio > 0.0) {
+        res.setHeight(qRound(originalSize.height() * ratio));
+        res.setWidth(qRound(originalSize.width() * ratio));
+    }
+    return res;
+}
+
+QQuickImageProviderWithOptions *QQuickImageProviderWithOptions::checkedCast(QQuickImageProvider *provider)
+{
+    if (provider && provider->d && provider->d->isProviderWithOptions)
+        return static_cast<QQuickImageProviderWithOptions *>(provider);
+
+    return nullptr;
+}
 
 QT_END_NAMESPACE
 
+#include "moc_qquickimageprovider.cpp"

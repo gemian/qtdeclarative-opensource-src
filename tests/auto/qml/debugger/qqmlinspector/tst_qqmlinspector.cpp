@@ -40,98 +40,92 @@
 #include <QtCore/qlibraryinfo.h>
 #include <QtNetwork/qhostaddress.h>
 
-#define STR_PORT_FROM "3772"
-#define STR_PORT_TO "3782"
-
-
-class tst_QQmlInspector : public QQmlDataTest
+class tst_QQmlInspector : public QQmlDebugTest
 {
     Q_OBJECT
 
 private:
-    void startQmlProcess(const QString &qmlFile, bool restrictMode = true);
+    ConnectResult startQmlProcess(const QString &qmlFile, bool restrictMode = true);
     void checkAnimationSpeed(int targetMillisPerDegree);
+    QList<QQmlDebugClient *> createClients() override;
+    QQmlDebugProcess *createProcess(const QString &executable) override;
 
-private:
-    QScopedPointer<QQmlDebugProcess> m_process;
-    QScopedPointer<QQmlDebugConnection> m_connection;
-    QScopedPointer<QQmlInspectorClient> m_client;
-    QScopedPointer<QQmlInspectorResultRecipient> m_recipient;
+    QPointer<QQmlInspectorClient> m_client;
+    QPointer<QQmlInspectorResultRecipient> m_recipient;
 
 private slots:
-    void cleanup();
-
     void connect_data();
     void connect();
     void setAnimationSpeed();
     void showAppOnTop();
 };
 
-void tst_QQmlInspector::startQmlProcess(const QString &qmlFile, bool restrictServices)
+QQmlDebugTest::ConnectResult tst_QQmlInspector::startQmlProcess(const QString &qmlFile,
+                                                                bool restrictServices)
 {
-    const QString argument = QString::fromLatin1("-qmljsdebugger=port:%1,%2,block%3")
-            .arg(STR_PORT_FROM).arg(STR_PORT_TO)
-            .arg(restrictServices ? QStringLiteral(",services:QmlInspector") : QString());
-
-    m_process.reset(new QQmlDebugProcess(TESTBINDIR "/qml"));
-    // Make sure the animation timing is exact
-    m_process->addEnvironment(QLatin1String("QSG_RENDER_LOOP=basic"));
-    m_process->start(QStringList() << argument << testFile(qmlFile));
-    QVERIFY2(m_process->waitForSessionStart(),
-             "Could not launch application, or did not get 'Waiting for connection'.");
-
-    m_client.reset();
-    m_connection.reset(new QQmlDebugConnection);
-    m_client.reset(new QQmlInspectorClient(m_connection.data()));
-
-    m_recipient.reset(new QQmlInspectorResultRecipient);
-    QObject::connect(m_client.data(), &QQmlInspectorClient::responseReceived,
-                     m_recipient.data(), &QQmlInspectorResultRecipient::recordResponse);
-
-    QList<QQmlDebugClient *> others = QQmlDebugTest::createOtherClients(m_connection.data());
-
-    m_connection->connectToHost(QLatin1String("127.0.0.1"), m_process->debugPort());
-    QTRY_COMPARE(m_client->state(), QQmlDebugClient::Enabled);
-
-    foreach (QQmlDebugClient *other, others)
-        QCOMPARE(other->state(), restrictServices ? QQmlDebugClient::Unavailable :
-                                                    QQmlDebugClient::Enabled);
-    qDeleteAll(others);
+    return QQmlDebugTest::connect(TESTBINDIR "/qml",
+                                  restrictServices ? QStringLiteral("QmlInspector") : QString(),
+                                  testFile(qmlFile), true);
 }
 
 void tst_QQmlInspector::checkAnimationSpeed(int targetMillisPerDegree)
 {
-    QString degreesString = QStringLiteral("degrees");
-    QString millisecondsString = QStringLiteral("milliseconds");
-    for (int i = 0; i < 2; ++i) { // skip one period; the change might have happened inside it
-        int position = m_process->output().length();
-        while (!m_process->output().mid(position).contains(degreesString) ||
-               !m_process->output().mid(position).contains(millisecondsString)) {
-            QVERIFY(QQmlDebugTest::waitForSignal(m_process.data(),
-                                                 SIGNAL(readyReadStandardOutput())));
+    const QString markerString = QStringLiteral("ms/degrees");
+
+    // Funny things can happen with time and VMs. Also the change might take a while to propagate.
+    // Thus, we wait until we either have 3 passes or 3 failures in a row, or 10 loops have passed.
+
+    int numFailures = 0;
+    int numPasses = 0;
+
+    for (int i = 0; i < 10; ++i) {
+        QString output = m_process->output();
+        int position = output.length();
+        do {
+            QVERIFY(QQmlDebugTest::waitForSignal(m_process, SIGNAL(readyReadStandardOutput())));
+            output = m_process->output();
+        } while (!output.mid(position).contains(markerString));
+
+
+        QStringList words = output.split(QLatin1Char(' '));
+        const int marker = words.lastIndexOf(markerString);
+        QVERIFY(marker > 1);
+        const double degrees = words[marker - 1].toDouble();
+        const int milliseconds = words[marker - 2].toInt();
+        const double millisecondsPerDegree = milliseconds / degrees;
+
+        if (millisecondsPerDegree > targetMillisPerDegree - 3
+                || millisecondsPerDegree < targetMillisPerDegree + 3) {
+            if (++numPasses == 3)
+                return; // pass
+            numFailures = 0;
+        } else {
+            QVERIFY2(++numFailures < 3,
+                     QString("3 consecutive failures when checking for %1 milliseconds per degree")
+                     .arg(targetMillisPerDegree).toLocal8Bit().constData());
+            numPasses = 0;
         }
     }
 
-    QStringList words = m_process->output().split(QLatin1Char(' '));
-    int degreesMarker = words.lastIndexOf(degreesString);
-    QVERIFY(degreesMarker > 1);
-    double degrees = words[degreesMarker - 1].toDouble();
-    int millisecondsMarker = words.lastIndexOf(millisecondsString);
-    QVERIFY(millisecondsMarker > 1);
-    int milliseconds = words[millisecondsMarker - 1].toInt();
-
-    double millisecondsPerDegree = milliseconds / degrees;
-    QVERIFY(millisecondsPerDegree > targetMillisPerDegree - 3);
-    QVERIFY(millisecondsPerDegree < targetMillisPerDegree + 3);
-
+    QFAIL(QString("Animation speed won't settle to %1 milliseconds per degree")
+          .arg(targetMillisPerDegree).toLocal8Bit().constData());
 }
 
-void tst_QQmlInspector::cleanup()
+QList<QQmlDebugClient *> tst_QQmlInspector::createClients()
 {
-    if (QTest::currentTestFailed()) {
-        qDebug() << "Process State:" << m_process->state();
-        qDebug() << "Application Output:" << m_process->output();
-    }
+    m_client = new QQmlInspectorClient(m_connection);
+    m_recipient = new QQmlInspectorResultRecipient(m_client);
+    QObject::connect(m_client.data(), &QQmlInspectorClient::responseReceived,
+                     m_recipient.data(), &QQmlInspectorResultRecipient::recordResponse);
+    return QList<QQmlDebugClient *>({m_client});
+}
+
+QQmlDebugProcess *tst_QQmlInspector::createProcess(const QString &executable)
+{
+    QQmlDebugProcess *process = QQmlDebugTest::createProcess(executable);
+    // Make sure the animation timing is exact
+    process->addEnvironment(QLatin1String("QSG_RENDER_LOOP=basic"));
+    return process;
 }
 
 void tst_QQmlInspector::connect_data()
@@ -148,7 +142,7 @@ void tst_QQmlInspector::connect()
 {
     QFETCH(QString, file);
     QFETCH(bool, restrictMode);
-    startQmlProcess(file, restrictMode);
+    QCOMPARE(startQmlProcess(file, restrictMode), ConnectSuccess);
     QVERIFY(m_client);
     QTRY_COMPARE(m_client->state(), QQmlDebugClient::Enabled);
 
@@ -163,7 +157,7 @@ void tst_QQmlInspector::connect()
 
 void tst_QQmlInspector::showAppOnTop()
 {
-    startQmlProcess("qtquick2.qml");
+    QCOMPARE(startQmlProcess("qtquick2.qml"), ConnectSuccess);
     QVERIFY(m_client);
     QTRY_COMPARE(m_client->state(), QQmlDebugClient::Enabled);
 
@@ -178,7 +172,7 @@ void tst_QQmlInspector::showAppOnTop()
 
 void tst_QQmlInspector::setAnimationSpeed()
 {
-    startQmlProcess("qtquick2.qml");
+    QCOMPARE(startQmlProcess("qtquick2.qml"), ConnectSuccess);
     QVERIFY(m_client);
     QTRY_COMPARE(m_client->state(), QQmlDebugClient::Enabled);
     checkAnimationSpeed(10);

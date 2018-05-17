@@ -71,6 +71,12 @@ namespace {
     };
 }
 
+void QQmlNotifier::notify(QQmlData *ddata, int notifierIndex)
+{
+    if (QQmlNotifierEndpoint *ep = ddata->notify(notifierIndex))
+        emitNotify(ep, Q_NULLPTR);
+}
+
 void QQmlNotifier::emitNotify(QQmlNotifierEndpoint *endpoint, void **a)
 {
     QVarLengthArray<NotifyListTraversalData> stack;
@@ -111,13 +117,13 @@ void QQmlNotifier::emitNotify(QQmlNotifierEndpoint *endpoint, void **a)
     \a sourceSignal MUST be in the signal index range (see QObjectPrivate::signalIndex()).
     This is different from QMetaMethod::methodIndex().
 */
-void QQmlNotifierEndpoint::connect(QObject *source, int sourceSignal, QQmlEngine *engine)
+void QQmlNotifierEndpoint::connect(QObject *source, int sourceSignal, QQmlEngine *engine, bool doNotify)
 {
     disconnect();
 
     Q_ASSERT(engine);
-    if (QObjectPrivate::get(source)->threadData->threadId !=
-        QObjectPrivate::get(engine)->threadData->threadId) {
+    if (QObjectPrivate::get(source)->threadData->threadId.load() !=
+        QObjectPrivate::get(engine)->threadData->threadId.load()) {
 
         QString sourceName;
         QDebug(&sourceName) << source;
@@ -136,8 +142,11 @@ void QQmlNotifierEndpoint::connect(QObject *source, int sourceSignal, QQmlEngine
     QQmlPropertyPrivate::flushSignal(source, sourceSignal);
     QQmlData *ddata = QQmlData::get(source, true);
     ddata->addNotify(sourceSignal, this);
-    QObjectPrivate * const priv = QObjectPrivate::get(source);
-    priv->connectNotify(QMetaObjectPrivate::signal(source->metaObject(), sourceSignal));
+    if (doNotify) {
+        needsConnectNotify = doNotify;
+        QObjectPrivate * const priv = QObjectPrivate::get(source);
+        priv->connectNotify(QMetaObjectPrivate::signal(source->metaObject(), sourceSignal));
+    }
 }
 
 QT_END_NAMESPACE

@@ -52,6 +52,9 @@ private slots:
     void rewriteErrors();
     void singletonTypeTarget();
     void enableDisable_QTBUG_36350();
+    void disabledAtStart();
+    void clearImplicitTarget();
+    void onWithoutASignal();
 
 private:
     QQmlEngine engine;
@@ -350,6 +353,58 @@ void tst_qqmlconnections::enableDisable_QTBUG_36350()
     QCOMPARE(item->property("tested").toBool(), true); //Should have received signal to change property
 
     delete item;
+}
+
+void tst_qqmlconnections::disabledAtStart()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("disabled-at-start.qml"));
+    QObject * const object = c.create();
+
+    QVERIFY(object != 0);
+
+    QCOMPARE(object->property("tested").toBool(), false);
+    const int index = object->metaObject()->indexOfSignal("testMe()");
+    const QMetaMethod method = object->metaObject()->method(index);
+    method.invoke(object, Qt::DirectConnection);
+    QCOMPARE(object->property("tested").toBool(), false);
+
+    delete object;
+}
+
+//QTBUG-56499
+void tst_qqmlconnections::clearImplicitTarget()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("test-connection-implicit.qml"));
+    QQuickItem *item = qobject_cast<QQuickItem*>(c.create());
+
+    QVERIFY(item != 0);
+
+    // normal case: fire Connections
+    item->setWidth(100.);
+    QCOMPARE(item->property("tested").toBool(), true);
+
+    item->setProperty("tested", false);
+    // clear the implicit target
+    QQmlConnections *connections = item->findChild<QQmlConnections*>();
+    QVERIFY(connections);
+    connections->setTarget(0);
+
+    // target cleared: no longer fire Connections
+    item->setWidth(150.);
+    QCOMPARE(item->property("tested").toBool(), false);
+
+    delete item;
+}
+
+void tst_qqmlconnections::onWithoutASignal()
+{
+    QQmlEngine engine;
+    QQmlComponent c(&engine, testFileUrl("connection-no-signal-name.qml"));
+    QVERIFY(c.isError()); // Cannot assign to non-existent property "on" expected
+    QScopedPointer<QQuickItem> item(qobject_cast<QQuickItem*>(c.create()));
+    QVERIFY(item == nullptr); // should parse error, and not give us an item (or crash).
 }
 
 QTEST_MAIN(tst_qqmlconnections)

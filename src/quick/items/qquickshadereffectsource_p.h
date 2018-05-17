@@ -51,11 +51,15 @@
 // We mean it.
 //
 
+#include <QtQuick/private/qtquickglobal_p.h>
+
+QT_REQUIRE_CONFIG(quick_shadereffect);
+
 #include "qquickitem.h"
 #include <QtQuick/qsgtextureprovider.h>
 #include <private/qsgadaptationlayer_p.h>
 #include <QtQuick/private/qsgcontext_p.h>
-#include <private/qsgdefaultimagenode_p.h>
+#include <private/qsgdefaultinternalimagenode_p.h>
 #include <private/qquickitemchangelistener_p.h>
 
 #include "qpointer.h"
@@ -84,6 +88,7 @@ class Q_QUICK_PRIVATE_EXPORT QQuickShaderEffectSource : public QQuickItem, publi
     Q_PROPERTY(bool mipmap READ mipmap WRITE setMipmap NOTIFY mipmapChanged)
     Q_PROPERTY(bool recursive READ recursive WRITE setRecursive NOTIFY recursiveChanged)
     Q_PROPERTY(TextureMirroring textureMirroring READ textureMirroring WRITE setTextureMirroring NOTIFY textureMirroringChanged REVISION 1)
+    Q_PROPERTY(int samples READ samples WRITE setSamples NOTIFY samplesChanged REVISION 2)
 
 public:
     enum WrapMode {
@@ -93,11 +98,11 @@ public:
         Repeat
     };
     Q_ENUM(WrapMode)
-
+    // Equivalents to GL_ALPHA and similar type constants.
     enum Format {
-        Alpha = GL_ALPHA,
-        RGB = GL_RGB,
-        RGBA = GL_RGBA
+        Alpha = 0x1906,
+        RGB = 0x1907,
+        RGBA = 0x1908
     };
     Q_ENUM(Format)
 
@@ -146,6 +151,9 @@ public:
 
     Q_INVOKABLE void scheduleUpdate();
 
+    int samples() const;
+    void setSamples(int count);
+
 Q_SIGNALS:
     void wrapModeChanged();
     void sourceItemChanged();
@@ -157,6 +165,7 @@ Q_SIGNALS:
     void mipmapChanged();
     void recursiveChanged();
     void textureMirroringChanged();
+    void samplesChanged();
 
     void scheduledUpdateCompleted();
 
@@ -168,7 +177,7 @@ protected:
     void releaseResources() Q_DECL_OVERRIDE;
     QSGNode *updatePaintNode(QSGNode *, UpdatePaintNodeData *) Q_DECL_OVERRIDE;
 
-    void itemGeometryChanged(QQuickItem *item, const QRectF &newRect, const QRectF &oldRect) Q_DECL_OVERRIDE;
+    void itemGeometryChanged(QQuickItem *item, QQuickGeometryChange change, const QRectF &) Q_DECL_OVERRIDE;
     void itemChange(ItemChange change, const ItemChangeData &value) Q_DECL_OVERRIDE;
 
 private:
@@ -181,6 +190,7 @@ private:
     QRectF m_sourceRect;
     QSize m_textureSize;
     Format m_format;
+    int m_samples;
     uint m_live : 1;
     uint m_hideSource : 1;
     uint m_mipmap : 1;

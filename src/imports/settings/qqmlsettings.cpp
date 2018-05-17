@@ -39,8 +39,10 @@
 
 #include "qqmlsettings_p.h"
 #include <qcoreevent.h>
+#include <qloggingcategory.h>
 #include <qsettings.h>
 #include <qpointer.h>
+#include <qjsvalue.h>
 #include <qdebug.h>
 #include <qhash.h>
 
@@ -187,6 +189,9 @@ QT_BEGIN_NAMESPACE
     only provides a cleaner settings structure, but also prevents possible
     conflicts between setting keys.
 
+    If several categories are required, use several Settings objects, each with
+    their own category:
+
     \qml
     Item {
         id: panel
@@ -196,6 +201,12 @@ QT_BEGIN_NAMESPACE
         Settings {
             category: "OutputPanel"
             property alias visible: panel.visible
+            // ...
+        }
+
+        Settings {
+            category: "General"
+            property alias fontSize: fontSizeSpinBox.value
             // ...
         }
     }
@@ -221,7 +232,7 @@ QT_BEGIN_NAMESPACE
     \sa QSettings
 */
 
-// #define SETTINGS_DEBUG
+Q_LOGGING_CATEGORY(lcSettings, "qt.labs.settings")
 
 static const int settingsWriteDelay = 500;
 
@@ -241,6 +252,7 @@ public:
     void store();
 
     void _q_propertyChanged();
+    QVariant readProperty(const QMetaProperty &property) const;
 
     QQmlSettings *q_ptr;
     int timerId;
@@ -271,9 +283,7 @@ QSettings *QQmlSettingsPrivate::instance() const
 void QQmlSettingsPrivate::init()
 {
     if (!initialized) {
-#ifdef SETTINGS_DEBUG
-        qDebug() << "QQmlSettings: stored at" << instance()->fileName();
-#endif
+        qCDebug(lcSettings) << "QQmlSettings: stored at" << instance()->fileName();
         load();
         initialized = true;
     }
@@ -295,15 +305,13 @@ void QQmlSettingsPrivate::load()
     for (int i = offset; i < count; ++i) {
         QMetaProperty property = mo->property(i);
 
-        const QVariant previousValue = property.read(q);
+        const QVariant previousValue = readProperty(property);
         const QVariant currentValue = instance()->value(property.name(), previousValue);
 
         if (!currentValue.isNull() && (!previousValue.isValid()
                 || (currentValue.canConvert(previousValue.type()) && previousValue != currentValue))) {
             property.write(q, currentValue);
-#ifdef SETTINGS_DEBUG
-            qDebug() << "QQmlSettings: load" << property.name() << "setting:" << currentValue << "default:" << previousValue;
-#endif
+            qCDebug(lcSettings) << "QQmlSettings: load" << property.name() << "setting:" << currentValue << "default:" << previousValue;
         }
 
         // ensure that a non-existent setting gets written
@@ -324,9 +332,7 @@ void QQmlSettingsPrivate::store()
     QHash<const char *, QVariant>::const_iterator it = changedProperties.constBegin();
     while (it != changedProperties.constEnd()) {
         instance()->setValue(it.key(), it.value());
-#ifdef SETTINGS_DEBUG
-        qDebug() << "QQmlSettings: store" << it.key() << ":" << it.value();
-#endif
+        qCDebug(lcSettings) << "QQmlSettings: store" << it.key() << ":" << it.value();
         ++it;
     }
     changedProperties.clear();
@@ -340,14 +346,22 @@ void QQmlSettingsPrivate::_q_propertyChanged()
     const int count = mo->propertyCount();
     for (int i = offset; i < count; ++i) {
         const QMetaProperty &property = mo->property(i);
-        changedProperties.insert(property.name(), property.read(q));
-#ifdef SETTINGS_DEBUG
-        qDebug() << "QQmlSettings: cache" << property.name() << ":" << property.read(q);
-#endif
+        const QVariant value = readProperty(property);
+        changedProperties.insert(property.name(), value);
+        qCDebug(lcSettings) << "QQmlSettings: cache" << property.name() << ":" << value;
     }
     if (timerId != 0)
         q->killTimer(timerId);
     timerId = q->startTimer(settingsWriteDelay);
+}
+
+QVariant QQmlSettingsPrivate::readProperty(const QMetaProperty &property) const
+{
+    Q_Q(const QQmlSettings);
+    QVariant var = property.read(q);
+    if (var.userType() == qMetaTypeId<QJSValue>())
+        var = var.value<QJSValue>().toVariant();
+    return var;
 }
 
 QQmlSettings::QQmlSettings(QObject *parent)

@@ -54,7 +54,13 @@
 #include <private/qsgcontext_p.h>
 #include <qsgsimplerectnode.h>
 
+QT_BEGIN_NAMESPACE
+
 #define QSG_DEBUG_FBO_OVERLAY
+
+class QOpenGLFramebufferObject;
+class QSGDepthStencilBuffer;
+class QSGDefaultRenderContext;
 
 class Q_QUICK_PRIVATE_EXPORT QSGDefaultLayer : public QSGLayer
 {
@@ -107,6 +113,9 @@ public:
 
     QRectF normalizedTextureSubRect() const Q_DECL_OVERRIDE;
 
+    int samples() const { return m_samples; }
+    void setSamples(int samples) Q_DECL_OVERRIDE { m_samples = samples; }
+
 public Q_SLOTS:
     void markDirtyTexture() Q_DECL_OVERRIDE;
     void invalidated() Q_DECL_OVERRIDE;
@@ -131,7 +140,8 @@ private:
     QSGSimpleRectNode *m_debugOverlay;
 #endif
 
-    QSGRenderContext *m_context;
+    QSGDefaultRenderContext *m_context;
+    int m_samples;
 
     uint m_mipmap : 1;
     uint m_live : 1;
@@ -143,5 +153,7 @@ private:
     uint m_mirrorHorizontal : 1;
     uint m_mirrorVertical : 1;
 };
+
+QT_END_NAMESPACE
 
 #endif // QSGDEFAULTLAYER_P_H

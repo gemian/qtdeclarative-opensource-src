@@ -68,10 +68,9 @@ QQuickStateAction::QQuickStateAction(QObject *target, const QString &propertyNam
         fromValue = property.read();
 }
 
-QQuickStateAction::QQuickStateAction(QObject *target, const QString &propertyName,
-               QQmlContext *context, const QVariant &value)
+QQuickStateAction::QQuickStateAction(QObject *target, const QQmlProperty &property, const QString &propertyName, const QVariant &value)
 : restore(true), actionDone(false), reverseEvent(false), deletableToBinding(false),
-  property(target, propertyName, context), toValue(value),
+  property(property), toValue(value),
   fromBinding(0), event(0),
   specifiedObject(target), specifiedProperty(propertyName)
 {
@@ -334,7 +333,7 @@ QQuickStatePrivate::generateActionList() const
             }
     }
 
-    foreach(QQuickStateOperation *op, operations)
+    for (QQuickStateOperation *op : operations)
         applyList << op->actions();
 
     inState = false;
@@ -676,7 +675,7 @@ void QQuickState::apply(QQuickTransition *trans, QQuickState *revert)
 #ifndef QT_NO_DEBUG_STREAM
     // Output for debugging
     if (stateChangeDebug()) {
-        foreach(const QQuickStateAction &action, applyList) {
+        for (const QQuickStateAction &action : qAsConst(applyList)) {
             if (action.event)
                 qWarning() << "    QQuickStateAction event:" << action.event->type();
             else
@@ -708,3 +707,5 @@ void QQuickStateOperation::setState(QQuickState *state)
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickstate_p.cpp"

@@ -38,7 +38,6 @@
 ****************************************************************************/
 
 #include "qqmltypewrapper_p.h"
-#include <private/qqmlcontextwrapper_p.h>
 #include <private/qv8engine_p.h>
 
 #include <private/qqmlengine_p.h>
@@ -53,46 +52,52 @@ QT_BEGIN_NAMESPACE
 
 using namespace QV4;
 
-DEFINE_OBJECT_VTABLE(QmlTypeWrapper);
+DEFINE_OBJECT_VTABLE(QQmlTypeWrapper);
+DEFINE_OBJECT_VTABLE(QQmlScopedEnumWrapper);
 
-Heap::QmlTypeWrapper::QmlTypeWrapper()
-    : mode(IncludeEnums)
+void Heap::QQmlTypeWrapper::init()
 {
+    Object::init();
+    mode = IncludeEnums;
+    object.init();
 }
 
-Heap::QmlTypeWrapper::~QmlTypeWrapper()
+void Heap::QQmlTypeWrapper::destroy()
 {
+    QQmlType::derefHandle(typePrivate);
+    typePrivate = nullptr;
     if (typeNamespace)
         typeNamespace->release();
+    object.destroy();
+    Object::destroy();
 }
 
-bool QmlTypeWrapper::isSingleton() const
+QQmlType Heap::QQmlTypeWrapper::type() const
 {
-    return d()->type && d()->type->isSingleton();
+    return QQmlType(typePrivate);
 }
 
-QObject* QmlTypeWrapper::singletonObject() const
+bool QQmlTypeWrapper::isSingleton() const
+{
+    return d()->type().isSingleton();
+}
+
+QObject* QQmlTypeWrapper::singletonObject() const
 {
     if (!isSingleton())
         return 0;
 
     QQmlEngine *e = engine()->qmlEngine();
-    QQmlType::SingletonInstanceInfo *siinfo = d()->type->singletonInstanceInfo();
+    QQmlType::SingletonInstanceInfo *siinfo = d()->type().singletonInstanceInfo();
     siinfo->init(e);
     return siinfo->qobjectApi(e);
 }
 
-QVariant QmlTypeWrapper::toVariant() const
+QVariant QQmlTypeWrapper::toVariant() const
 {
-    if (d()->type && d()->type->isSingleton()) {
-        QQmlEngine *e = engine()->qmlEngine();
-        QQmlType::SingletonInstanceInfo *siinfo = d()->type->singletonInstanceInfo();
-        siinfo->init(e); // note: this will also create QJSValue singleton which isn't strictly required.
-        QObject *qobjectSingleton = siinfo->qobjectApi(e);
-        if (qobjectSingleton) {
-            return QVariant::fromValue<QObject*>(qobjectSingleton);
-        }
-    }
+    QObject *qobjectSingleton = singletonObject();
+    if (qobjectSingleton)
+        return QVariant::fromValue<QObject*>(qobjectSingleton);
 
     // only QObject Singleton Type can be converted to a variant.
     return QVariant();
@@ -100,63 +105,71 @@ QVariant QmlTypeWrapper::toVariant() const
 
 
 // Returns a type wrapper for type t on o.  This allows access of enums, and attached properties.
-ReturnedValue QmlTypeWrapper::create(QV4::ExecutionEngine *engine, QObject *o, QQmlType *t,
-                                     Heap::QmlTypeWrapper::TypeNameMode mode)
+ReturnedValue QQmlTypeWrapper::create(QV4::ExecutionEngine *engine, QObject *o, const QQmlType &t,
+                                     Heap::QQmlTypeWrapper::TypeNameMode mode)
 {
-    Q_ASSERT(t);
+    Q_ASSERT(t.isValid());
     Scope scope(engine);
 
-    Scoped<QmlTypeWrapper> w(scope, engine->memoryManager->allocObject<QmlTypeWrapper>());
-    w->d()->mode = mode; w->d()->object = o; w->d()->type = t;
+    Scoped<QQmlTypeWrapper> w(scope, engine->memoryManager->allocObject<QQmlTypeWrapper>());
+    w->d()->mode = mode; w->d()->object = o;
+    w->d()->typePrivate = t.priv();
+    QQmlType::refHandle(w->d()->typePrivate);
     return w.asReturnedValue();
 }
 
 // Returns a type wrapper for importNamespace (of t) on o.  This allows nested resolution of a type in a
 // namespace.
-ReturnedValue QmlTypeWrapper::create(QV4::ExecutionEngine *engine, QObject *o, QQmlTypeNameCache *t, const void *importNamespace,
-                                     Heap::QmlTypeWrapper::TypeNameMode mode)
+ReturnedValue QQmlTypeWrapper::create(QV4::ExecutionEngine *engine, QObject *o, QQmlTypeNameCache *t, const QQmlImportRef *importNamespace,
+                                     Heap::QQmlTypeWrapper::TypeNameMode mode)
 {
     Q_ASSERT(t);
     Q_ASSERT(importNamespace);
     Scope scope(engine);
 
-    Scoped<QmlTypeWrapper> w(scope, engine->memoryManager->allocObject<QmlTypeWrapper>());
+    Scoped<QQmlTypeWrapper> w(scope, engine->memoryManager->allocObject<QQmlTypeWrapper>());
     w->d()->mode = mode; w->d()->object = o; w->d()->typeNamespace = t; w->d()->importNamespace = importNamespace;
     t->addref();
     return w.asReturnedValue();
 }
 
-static int enumForSingleton(String *name, QObject *qobjectSingleton)
+static int enumForSingleton(QV4::ExecutionEngine *v4, String *name, QObject *qobjectSingleton,
+                            const QQmlType &type, bool *ok)
 {
+    Q_ASSERT(ok != nullptr);
+    int value = type.enumValue(QQmlEnginePrivate::get(v4->qmlEngine()), name, ok);
+    if (*ok)
+        return value;
+
     // ### Optimize
     QByteArray enumName = name->toQString().toUtf8();
     const QMetaObject *metaObject = qobjectSingleton->metaObject();
     for (int ii = metaObject->enumeratorCount() - 1; ii >= 0; --ii) {
         QMetaEnum e = metaObject->enumerator(ii);
-        bool ok;
-        int value = e.keyToValue(enumName.constData(), &ok);
-        if (ok)
+        value = e.keyToValue(enumName.constData(), ok);
+        if (*ok)
             return value;
     }
+    *ok = false;
     return -1;
 }
 
-static ReturnedValue throwLowercaseEnumError(QV4::ExecutionEngine *v4, String *name, QQmlType *type)
+static ReturnedValue throwLowercaseEnumError(QV4::ExecutionEngine *v4, String *name, const QQmlType &type)
 {
     const QString message =
             QStringLiteral("Cannot access enum value '%1' of '%2', enum values need to start with an uppercase letter.")
-                .arg(name->toQString()).arg(QLatin1String(type->typeName()));
+                .arg(name->toQString()).arg(QLatin1String(type.typeName()));
     return v4->throwTypeError(message);
 }
 
-ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasProperty)
+ReturnedValue QQmlTypeWrapper::get(const Managed *m, String *name, bool *hasProperty)
 {
-    Q_ASSERT(m->as<QmlTypeWrapper>());
+    Q_ASSERT(m->as<QQmlTypeWrapper>());
 
-    QV4::ExecutionEngine *v4 = static_cast<const QmlTypeWrapper *>(m)->engine();
+    QV4::ExecutionEngine *v4 = static_cast<const QQmlTypeWrapper *>(m)->engine();
     QV4::Scope scope(v4);
 
-    Scoped<QmlTypeWrapper> w(scope, static_cast<const QmlTypeWrapper *>(m));
+    Scoped<QQmlTypeWrapper> w(scope, static_cast<const QQmlTypeWrapper *>(m));
 
     if (hasProperty)
         *hasProperty = true;
@@ -164,24 +177,25 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
     QQmlContextData *context = v4->callingQmlContext();
 
     QObject *object = w->d()->object;
-    QQmlType *type = w->d()->type;
+    QQmlType type = w->d()->type();
 
-    if (type) {
+    if (type.isValid()) {
 
         // singleton types are handled differently to other types.
-        if (type->isSingleton()) {
+        if (type.isSingleton()) {
             QQmlEngine *e = v4->qmlEngine();
-            QQmlType::SingletonInstanceInfo *siinfo = type->singletonInstanceInfo();
+            QQmlType::SingletonInstanceInfo *siinfo = type.singletonInstanceInfo();
             siinfo->init(e);
 
             QObject *qobjectSingleton = siinfo->qobjectApi(e);
             if (qobjectSingleton) {
 
                 // check for enum value
-                const bool includeEnums = w->d()->mode == Heap::QmlTypeWrapper::IncludeEnums;
+                const bool includeEnums = w->d()->mode == Heap::QQmlTypeWrapper::IncludeEnums;
                 if (includeEnums && name->startsWithUpper()) {
-                    const int value = enumForSingleton(name, qobjectSingleton);
-                    if (value != -1)
+                    bool ok = false;
+                    const int value = enumForSingleton(v4, name, qobjectSingleton, type, &ok);
+                    if (ok)
                         return QV4::Primitive::fromInt32(value).asReturnedValue();
                 }
 
@@ -193,8 +207,8 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
 
                 // Warn when attempting to access a lowercased enum value, singleton case
                 if (!ok && includeEnums && !name->startsWithUpper()) {
-                    const int value = enumForSingleton(name, qobjectSingleton);
-                    if (value != -1)
+                    enumForSingleton(v4, name, qobjectSingleton, type, &ok);
+                    if (ok)
                         return throwLowercaseEnumError(v4, name, type);
                 }
 
@@ -212,14 +226,23 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
 
             if (name->startsWithUpper()) {
                 bool ok = false;
-                int value = type->enumValue(QQmlEnginePrivate::get(v4->qmlEngine()), name, &ok);
+                int value = type.enumValue(QQmlEnginePrivate::get(v4->qmlEngine()), name, &ok);
                 if (ok)
                     return QV4::Primitive::fromInt32(value).asReturnedValue();
+
+                value = type.scopedEnumIndex(QQmlEnginePrivate::get(v4->qmlEngine()), name, &ok);
+                if (ok) {
+                    Scoped<QQmlScopedEnumWrapper> enumWrapper(scope, v4->memoryManager->allocObject<QQmlScopedEnumWrapper>());
+                    enumWrapper->d()->typePrivate = type.priv();
+                    QQmlType::refHandle(enumWrapper->d()->typePrivate);
+                    enumWrapper->d()->scopeEnumIndex = value;
+                    return enumWrapper.asReturnedValue();
+                }
 
                 // Fall through to base implementation
 
             } else if (w->d()->object) {
-                QObject *ao = qmlAttachedPropertiesObjectById(type->attachedPropertiesId(QQmlEnginePrivate::get(v4->qmlEngine())), object);
+                QObject *ao = qmlAttachedPropertiesObjectById(type.attachedPropertiesId(QQmlEnginePrivate::get(v4->qmlEngine())), object);
                 if (ao)
                     return QV4::QObjectWrapper::getQmlProperty(v4, context, ao, name, QV4::QObjectWrapper::IgnoreRevision, hasProperty);
 
@@ -236,7 +259,7 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
         QQmlTypeNameCache::Result r = w->d()->typeNamespace->query(name, w->d()->importNamespace);
 
         if (r.isValid()) {
-            if (r.type) {
+            if (r.type.isValid()) {
                 return create(scope.engine, object, r.type, w->d()->mode);
             } else if (r.scriptIndex != -1) {
                 QV4::ScopedObject scripts(scope, context->importedScripts.valueRef());
@@ -261,9 +284,9 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
         *hasProperty = ok;
 
     // Warn when attempting to access a lowercased enum value, non-singleton case
-    if (!ok && type && !type->isSingleton() && !name->startsWithUpper()) {
+    if (!ok && type.isValid() && !type.isSingleton() && !name->startsWithUpper()) {
         bool enumOk = false;
-        type->enumValue(QQmlEnginePrivate::get(v4->qmlEngine()), name, &enumOk);
+        type.enumValue(QQmlEnginePrivate::get(v4->qmlEngine()), name, &enumOk);
         if (enumOk)
             return throwLowercaseEnumError(v4, name, type);
     }
@@ -272,46 +295,49 @@ ReturnedValue QmlTypeWrapper::get(const Managed *m, String *name, bool *hasPrope
 }
 
 
-void QmlTypeWrapper::put(Managed *m, String *name, const Value &value)
+bool QQmlTypeWrapper::put(Managed *m, String *name, const Value &value)
 {
-    Q_ASSERT(m->as<QmlTypeWrapper>());
-    QmlTypeWrapper *w = static_cast<QmlTypeWrapper *>(m);
+    Q_ASSERT(m->as<QQmlTypeWrapper>());
+    QQmlTypeWrapper *w = static_cast<QQmlTypeWrapper *>(m);
     QV4::ExecutionEngine *v4 = w->engine();
     if (v4->hasException)
-        return;
+        return false;
 
     QV4::Scope scope(v4);
     QQmlContextData *context = v4->callingQmlContext();
 
-    QQmlType *type = w->d()->type;
-    if (type && !type->isSingleton() && w->d()->object) {
+    QQmlType type = w->d()->type();
+    if (type.isValid() && !type.isSingleton() && w->d()->object) {
         QObject *object = w->d()->object;
         QQmlEngine *e = scope.engine->qmlEngine();
-        QObject *ao = qmlAttachedPropertiesObjectById(type->attachedPropertiesId(QQmlEnginePrivate::get(e)), object);
+        QObject *ao = qmlAttachedPropertiesObjectById(type.attachedPropertiesId(QQmlEnginePrivate::get(e)), object);
         if (ao)
-            QV4::QObjectWrapper::setQmlProperty(v4, context, ao, name, QV4::QObjectWrapper::IgnoreRevision, value);
-    } else if (type && type->isSingleton()) {
+            return QV4::QObjectWrapper::setQmlProperty(v4, context, ao, name, QV4::QObjectWrapper::IgnoreRevision, value);
+        return false;
+    } else if (type.isSingleton()) {
         QQmlEngine *e = scope.engine->qmlEngine();
-        QQmlType::SingletonInstanceInfo *siinfo = type->singletonInstanceInfo();
+        QQmlType::SingletonInstanceInfo *siinfo = type.singletonInstanceInfo();
         siinfo->init(e);
 
         QObject *qobjectSingleton = siinfo->qobjectApi(e);
         if (qobjectSingleton) {
-            QV4::QObjectWrapper::setQmlProperty(v4, context, qobjectSingleton, name, QV4::QObjectWrapper::IgnoreRevision, value);
+            return QV4::QObjectWrapper::setQmlProperty(v4, context, qobjectSingleton, name, QV4::QObjectWrapper::IgnoreRevision, value);
         } else if (!siinfo->scriptApi(e).isUndefined()) {
             QV4::ScopedObject apiprivate(scope, QJSValuePrivate::convertedToValue(v4, siinfo->scriptApi(e)));
             if (!apiprivate) {
                 QString error = QLatin1String("Cannot assign to read-only property \"") + name->toQString() + QLatin1Char('\"');
                 v4->throwError(error);
-                return;
+                return false;
             } else {
-                apiprivate->put(name, value);
+                return apiprivate->put(name, value);
             }
         }
     }
+
+    return false;
 }
 
-PropertyAttributes QmlTypeWrapper::query(const Managed *m, String *name)
+PropertyAttributes QQmlTypeWrapper::query(const Managed *m, String *name)
 {
     // ### Implement more efficiently.
     bool hasProperty = false;
@@ -319,16 +345,88 @@ PropertyAttributes QmlTypeWrapper::query(const Managed *m, String *name)
     return hasProperty ? Attr_Data : Attr_Invalid;
 }
 
-bool QmlTypeWrapper::isEqualTo(Managed *a, Managed *b)
+bool QQmlTypeWrapper::isEqualTo(Managed *a, Managed *b)
 {
-    Q_ASSERT(a->as<QV4::QmlTypeWrapper>());
-    QV4::QmlTypeWrapper *qmlTypeWrapperA = static_cast<QV4::QmlTypeWrapper *>(a);
-    if (QV4::QmlTypeWrapper *qmlTypeWrapperB = b->as<QV4::QmlTypeWrapper>())
+    Q_ASSERT(a->as<QV4::QQmlTypeWrapper>());
+    QV4::QQmlTypeWrapper *qmlTypeWrapperA = static_cast<QV4::QQmlTypeWrapper *>(a);
+    if (QV4::QQmlTypeWrapper *qmlTypeWrapperB = b->as<QV4::QQmlTypeWrapper>())
         return qmlTypeWrapperA->toVariant() == qmlTypeWrapperB->toVariant();
     else if (QV4::QObjectWrapper *qobjectWrapper = b->as<QV4::QObjectWrapper>())
         return qmlTypeWrapperA->toVariant().value<QObject*>() == qobjectWrapper->object();
 
     return false;
+}
+
+ReturnedValue QQmlTypeWrapper::instanceOf(const Object *typeObject, const Value &var)
+{
+    Q_ASSERT(typeObject->as<QV4::QQmlTypeWrapper>());
+    const QV4::QQmlTypeWrapper *typeWrapper = static_cast<const QV4::QQmlTypeWrapper *>(typeObject);
+    QV4::ExecutionEngine *engine = typeObject->internalClass()->engine;
+    QQmlEnginePrivate *qenginepriv = QQmlEnginePrivate::get(engine->qmlEngine());
+
+    // can only compare a QObject* against a QML type
+    const QObjectWrapper *wrapper = var.as<QObjectWrapper>();
+    if (!wrapper)
+        return engine->throwTypeError();
+
+    // in case the wrapper outlived the QObject*
+    const QObject *wrapperObject = wrapper->object();
+    if (!wrapperObject)
+        return engine->throwTypeError();
+
+    const int myTypeId = typeWrapper->d()->type().typeId();
+    QQmlMetaObject myQmlType;
+    if (myTypeId == 0) {
+        // we're a composite type; a composite type cannot be equal to a
+        // non-composite object instance (Rectangle{} is never an instance of
+        // CustomRectangle)
+        QQmlData *theirDData = QQmlData::get(wrapperObject, /*create=*/false);
+        Q_ASSERT(theirDData); // must exist, otherwise how do we have a QObjectWrapper for it?!
+        if (!theirDData->compilationUnit)
+            return Encode(false);
+
+        QQmlTypeData *td = qenginepriv->typeLoader.getType(typeWrapper->d()->type().sourceUrl());
+        CompiledData::CompilationUnit *cu = td->compilationUnit();
+        myQmlType = qenginepriv->metaObjectForType(cu->metaTypeId);
+    } else {
+        myQmlType = qenginepriv->metaObjectForType(myTypeId);
+    }
+
+    const QMetaObject *theirType = wrapperObject->metaObject();
+
+    return QV4::Encode(QQmlMetaObject::canConvert(theirType, myQmlType));
+}
+
+void Heap::QQmlScopedEnumWrapper::destroy()
+{
+    QQmlType::derefHandle(typePrivate);
+    typePrivate = nullptr;
+    Object::destroy();
+}
+
+QQmlType Heap::QQmlScopedEnumWrapper::type() const
+{
+    return QQmlType(typePrivate);
+}
+
+ReturnedValue QQmlScopedEnumWrapper::get(const Managed *m, String *name, bool *hasProperty)
+{
+    Q_ASSERT(m->as<QQmlScopedEnumWrapper>());
+    const QQmlScopedEnumWrapper *resource = static_cast<const QQmlScopedEnumWrapper *>(m);
+    QV4::ExecutionEngine *v4 = resource->engine();
+    QV4::Scope scope(v4);
+
+    QQmlType type = resource->d()->type();
+    int index = resource->d()->scopeEnumIndex;
+
+    bool ok = false;
+    int value = type.scopedEnumValue(QQmlEnginePrivate::get(v4->qmlEngine()), index, name, &ok);
+    if (hasProperty)
+        *hasProperty = ok;
+    if (ok)
+        return QV4::Primitive::fromInt32(value).asReturnedValue();
+
+    return Encode::undefined();
 }
 
 QT_END_NAMESPACE

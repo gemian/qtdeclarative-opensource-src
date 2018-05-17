@@ -40,6 +40,8 @@
 #ifndef QQMLINCUBATOR_P_H
 #define QQMLINCUBATOR_P_H
 
+#include "qqmlincubator.h"
+
 #include <private/qintrusivelist_p.h>
 #include <private/qqmlvme_p.h>
 #include <private/qrecursionwatcher_p.h>
@@ -59,7 +61,6 @@
 
 QT_BEGIN_NAMESPACE
 
-class QQmlCompiledData;
 class QQmlIncubator;
 class QQmlIncubatorPrivate : public QQmlEnginePrivate::Incubator
 {
@@ -85,7 +86,8 @@ public:
 
     QPointer<QObject> result;
     QQmlGuardedContextData rootContext;
-    QQmlCompiledData *compiledData;
+    QQmlEnginePrivate *enginePriv;
+    QQmlRefPointer<QV4::CompiledData::CompilationUnit> compilationUnit;
     QScopedPointer<QQmlObjectCreator> creator;
     int subComponentToCreate;
     QQmlVMEGuard vmeGuard;

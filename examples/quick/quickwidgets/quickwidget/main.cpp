@@ -1,12 +1,22 @@
 /****************************************************************************
 **
-** Copyright (C) 2015 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Copyright (C) 2017 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the examples of the Qt Toolkit.
 **
 ** $QT_BEGIN_LICENSE:BSD$
-** You may use this file under the terms of the BSD license as follows:
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
+**
+** BSD License Usage
+** Alternatively, you may use this file under the terms of the BSD license
+** as follows:
 **
 ** "Redistribution and use in source and binary forms, with or without
 ** modification, are permitted provided that the following conditions are
@@ -42,6 +52,10 @@
 #include <QQuickItem>
 #include <QQmlError>
 #include <QtWidgets>
+#include "fbitem.h"
+
+static bool optMultipleSample = false;
+static bool optCoreProfile = false;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -54,6 +68,7 @@ private slots:
     void grabFramebuffer();
     void renderToPixmap();
     void grabToImage();
+    void createQuickWidgetsInTabs(QMdiArea *mdiArea);
 
 private:
     QQuickWidget *m_quickWidget;
@@ -63,11 +78,11 @@ MainWindow::MainWindow()
    : m_quickWidget(new QQuickWidget)
 {
     QSurfaceFormat format;
-    if (QCoreApplication::arguments().contains(QStringLiteral("--coreprofile"))) {
+    if (optCoreProfile) {
         format.setVersion(4, 4);
         format.setProfile(QSurfaceFormat::CoreProfile);
     }
-    if (QCoreApplication::arguments().contains(QStringLiteral("--multisample")))
+    if (optMultipleSample)
         format.setSamples(4);
     m_quickWidget->setFormat(format);
 
@@ -76,7 +91,7 @@ MainWindow::MainWindow()
     QLCDNumber *lcd = new QLCDNumber;
     lcd->display(1337);
     lcd->setMinimumSize(250,100);
-    centralWidget ->addSubWindow(lcd);
+    centralWidget->addSubWindow(lcd);
 
     QUrl source("qrc:quickwidget/rotatingsquare.qml");
 
@@ -88,7 +103,7 @@ MainWindow::MainWindow()
     m_quickWidget->setResizeMode(QQuickWidget::SizeRootObjectToView );
     m_quickWidget->setSource(source);
 
-    centralWidget ->addSubWindow(m_quickWidget);
+    centralWidget->addSubWindow(m_quickWidget);
 
     setCentralWidget(centralWidget);
 
@@ -97,13 +112,42 @@ MainWindow::MainWindow()
     fileMenu->addAction(tr("Render to pixmap"), this, &MainWindow::renderToPixmap);
     fileMenu->addAction(tr("Grab via grabToImage"), this, &MainWindow::grabToImage);
     fileMenu->addAction(tr("Quit"), qApp, &QCoreApplication::quit);
+
+    QMenu *windowMenu = menuBar()->addMenu(tr("&Window"));
+    windowMenu->addAction(tr("Add tab widget"), this,
+                          [this, centralWidget] { createQuickWidgetsInTabs(centralWidget); });
+}
+
+void MainWindow::createQuickWidgetsInTabs(QMdiArea *mdiArea)
+{
+    QTabWidget *tabWidget = new QTabWidget;
+
+    const QSize size(400, 400);
+
+    QQuickWidget *w = new QQuickWidget;
+    w->resize(size);
+    w->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    w->setSource(QUrl("qrc:quickwidget/rotatingsquaretab.qml"));
+
+    tabWidget->addTab(w, tr("Plain Quick content"));
+
+    w = new QQuickWidget;
+    w->resize(size);
+    w->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    w->setSource(QUrl("qrc:quickwidget/customgl.qml"));
+
+    tabWidget->addTab(w, tr("Custom OpenGL drawing"));
+
+    mdiArea->addSubWindow(tabWidget);
+    tabWidget->show();
 }
 
 void MainWindow::quickWidgetStatusChanged(QQuickWidget::Status status)
 {
     if (status == QQuickWidget::Error) {
         QStringList errors;
-        foreach (const QQmlError &error, m_quickWidget->errors())
+        const auto widgetErrors = m_quickWidget->errors();
+        for (const QQmlError &error : widgetErrors)
             errors.append(error.toString());
         statusBar()->showMessage(errors.join(QStringLiteral(", ")));
     }
@@ -152,6 +196,25 @@ void MainWindow::grabToImage()
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+
+    QCoreApplication::setApplicationName("Qt QQuickWidget Example");
+    QCoreApplication::setOrganizationName("QtProject");
+    QCoreApplication::setApplicationVersion(QT_VERSION_STR);
+    QCommandLineParser parser;
+    parser.setApplicationDescription(QCoreApplication::applicationName());
+    parser.addHelpOption();
+    parser.addVersionOption();
+    QCommandLineOption multipleSampleOption("multisample", "Multisampling");
+    parser.addOption(multipleSampleOption);
+    QCommandLineOption coreProfileOption("coreprofile", "Use core profile");
+    parser.addOption(coreProfileOption);
+
+    parser.process(app);
+
+    optMultipleSample = parser.isSet(multipleSampleOption);
+    optCoreProfile = parser.isSet(coreProfileOption);
+
+    qmlRegisterType<FbItem>("QuickWidgetExample", 1, 0, "FbItem");
 
     MainWindow mainWindow;
     mainWindow.show();

@@ -44,9 +44,6 @@
 #include <QtQml/qqmlinfo.h>
 #include <QtCore/qcoreapplication.h>
 
-#include <QtQuick/private/qquickstate_p.h>
-#include <QtQuick/private/qquickstategroup_p.h>
-#include <private/qquickstatechangescript_p.h>
 #include <QtQuick/private/qquicktransition_p.h>
 
 QT_BEGIN_NAMESPACE
@@ -290,6 +287,11 @@ void QQuickBasePositioner::itemChange(ItemChange change, const ItemChangeData &v
     QQuickItem::itemChange(change, value);
 }
 
+void QQuickBasePositioner::forceLayout()
+{
+    updatePolish();
+}
+
 void QQuickBasePositioner::prePositioning()
 {
     Q_D(QQuickBasePositioner);
@@ -401,6 +403,8 @@ void QQuickBasePositioner::prePositioning()
 
     //Set implicit size to the size of its children
     setImplicitSize(contentSize.width(), contentSize.height());
+
+    emit positioningComplete();
 }
 
 void QQuickBasePositioner::positionItem(qreal x, qreal y, PositionedItem *target)
@@ -910,6 +914,28 @@ void QQuickPositionerAttached::setIsLastItem(bool isLastItem)
 
   \sa Grid::spacing
 */
+/*!
+    \qmlmethod QtQuick::Column::forceLayout()
+    \since 5.9
+
+    Column typically positions its children once per frame. This means that
+    inside script blocks it is possible for the underlying children to have changed,
+    but the Column to have not yet been updated accordingly.
+
+    This method forces the Column to immediately respond to any outstanding
+    changes in its children.
+
+    \b Note: methods in general should only be called after the Component has completed.
+*/
+/*!
+    \qmlsignal QtQuick::Column::positioningComplete()
+    \since 5.9
+
+    This signal is emitted when positioning has been completed.
+
+    The corresponding handler is \c onPositioningComplete.
+*/
+
 QQuickColumn::QQuickColumn(QQuickItem *parent)
 : QQuickBasePositioner(Vertical, parent)
 {
@@ -957,7 +983,7 @@ void QQuickColumn::reportConflictingAnchors()
         }
     }
     if (d->anchorConflict) {
-        qmlInfo(this) << "Cannot specify top, bottom, verticalCenter, fill or centerIn anchors for items inside Column."
+        qmlWarning(this) << "Cannot specify top, bottom, verticalCenter, fill or centerIn anchors for items inside Column."
             << " Column will not function.";
     }
 }
@@ -1077,6 +1103,27 @@ void QQuickColumn::reportConflictingAnchors()
 
   \sa Grid::spacing
 */
+/*!
+    \qmlmethod QtQuick::Row::forceLayout()
+    \since 5.9
+
+    Row typically positions its children once per frame. This means that
+    inside script blocks it is possible for the underlying children to have changed,
+    but the Row to have not yet been updated accordingly.
+
+    This method forces the Row to immediately respond to any outstanding
+    changes in its children.
+
+    \b Note: methods in general should only be called after the Component has completed.
+*/
+/*!
+    \qmlsignal QtQuick::Row::positioningComplete()
+    \since 5.9
+
+    This signal is emitted when positioning has been completed.
+
+    The corresponding handler is \c onPositioningComplete.
+*/
 
 class QQuickRowPrivate : public QQuickBasePositionerPrivate
 {
@@ -1087,7 +1134,7 @@ public:
         : QQuickBasePositionerPrivate()
     {}
 
-    void effectiveLayoutDirectionChange()
+    void effectiveLayoutDirectionChange() override
     {
         Q_Q(QQuickRow);
         // For RTL layout the positioning changes when the width changes.
@@ -1224,7 +1271,7 @@ void QQuickRow::reportConflictingAnchors()
         }
     }
     if (d->anchorConflict)
-        qmlInfo(this) << "Cannot specify left, right, horizontalCenter, fill or centerIn anchors for items inside Row."
+        qmlWarning(this) << "Cannot specify left, right, horizontalCenter, fill or centerIn anchors for items inside Row."
             << " Row will not function.";
 }
 
@@ -1355,6 +1402,27 @@ void QQuickRow::reportConflictingAnchors()
 
   \sa rows, columns
 */
+/*!
+    \qmlmethod QtQuick::Grid::forceLayout()
+    \since 5.9
+
+    Grid typically positions its children once per frame. This means that
+    inside script blocks it is possible for the underlying children to have changed,
+    but the Grid to have not yet been updated accordingly.
+
+    This method forces the Grid to immediately respond to any outstanding
+    changes in its children.
+
+    \b Note: methods in general should only be called after the Component has completed.
+*/
+/*!
+    \qmlsignal QtQuick::Grid::positioningComplete()
+    \since 5.9
+
+    This signal is emitted when positioning has been completed.
+
+    The corresponding handler is \c onPositioningComplete.
+*/
 
 class QQuickGridPrivate : public QQuickBasePositionerPrivate
 {
@@ -1365,7 +1433,7 @@ public:
         : QQuickBasePositionerPrivate()
     {}
 
-    void effectiveLayoutDirectionChange()
+    void effectiveLayoutDirectionChange() override
     {
         Q_Q(QQuickGrid);
         // For RTL layout the positioning changes when the width changes.
@@ -1808,7 +1876,7 @@ void QQuickGrid::reportConflictingAnchors()
         }
     }
     if (d->anchorConflict)
-        qmlInfo(this) << "Cannot specify anchors for items inside Grid." << " Grid will not function.";
+        qmlWarning(this) << "Cannot specify anchors for items inside Grid." << " Grid will not function.";
 }
 
 /*!
@@ -1920,6 +1988,28 @@ void QQuickGrid::reportConflictingAnchors()
 
   \sa Grid::spacing
 */
+/*!
+    \qmlmethod QtQuick::Flow::forceLayout()
+    \since 5.9
+
+    Flow typically positions its children once per frame. This means that
+    inside script blocks it is possible for the underlying children to have changed,
+    but the Flow to have not yet been updated accordingly.
+
+    This method forces the Flow to immediately respond to any outstanding
+    changes in its children.
+
+
+    \b Note: methods in general should only be called after the Component has completed.
+*/
+/*!
+    \qmlsignal QtQuick::Flow::positioningComplete()
+    \since 5.9
+
+    This signal is emitted when positioning has been completed.
+
+    The corresponding handler is \c onPositioningComplete.
+*/
 
 class QQuickFlowPrivate : public QQuickBasePositionerPrivate
 {
@@ -1930,7 +2020,7 @@ public:
         : QQuickBasePositionerPrivate(), flow(QQuickFlow::LeftToRight)
     {}
 
-    void effectiveLayoutDirectionChange()
+    void effectiveLayoutDirectionChange() override
     {
         Q_Q(QQuickFlow);
         // Don't postpone, as it might be the only trigger for visible changes.
@@ -2121,7 +2211,9 @@ void QQuickFlow::reportConflictingAnchors()
         }
     }
     if (d->anchorConflict)
-        qmlInfo(this) << "Cannot specify anchors for items inside Flow." << " Flow will not function.";
+        qmlWarning(this) << "Cannot specify anchors for items inside Flow." << " Flow will not function.";
 }
 
 QT_END_NAMESPACE
+
+#include "moc_qquickpositioners_p.cpp"

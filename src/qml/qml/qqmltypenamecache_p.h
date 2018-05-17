@@ -56,17 +56,35 @@
 #include "qqmlmetatype_p.h"
 
 #include <private/qhashedstring_p.h>
+#include <private/qqmlimport_p.h>
 
 #include <QtCore/qvector.h>
 
 QT_BEGIN_NAMESPACE
 
+struct QQmlImportRef {
+    inline QQmlImportRef()
+        : scriptIndex(-1)
+    {}
+    // Imported module
+    QVector<QQmlTypeModuleVersion> modules;
+
+    // Or, imported script
+    int scriptIndex;
+
+    // Or, imported compositeSingletons
+    QStringHash<QUrl> compositeSingletons;
+
+    // The qualifier of this import
+    QString m_qualifier;
+};
+
 class QQmlType;
 class QQmlEngine;
-class QQmlTypeNameCache : public QQmlRefCount
+class Q_QML_PRIVATE_EXPORT QQmlTypeNameCache : public QQmlRefCount
 {
 public:
-    QQmlTypeNameCache();
+    QQmlTypeNameCache(const QQmlImports &imports);
     virtual ~QQmlTypeNameCache();
 
     inline bool isEmpty() const;
@@ -76,46 +94,35 @@ public:
 
     struct Result {
         inline Result();
-        inline Result(const void *importNamespace);
-        inline Result(QQmlType *type);
+        inline Result(const QQmlImportRef *importNamespace);
+        inline Result(const QQmlType &type);
         inline Result(int scriptIndex);
         inline Result(const Result &);
 
         inline bool isValid() const;
 
-        QQmlType *type;
-        const void *importNamespace;
+        QQmlType type;
+        const QQmlImportRef *importNamespace;
         int scriptIndex;
     };
-    Result query(const QHashedStringRef &);
-    Result query(const QHashedStringRef &, const void *importNamespace);
-    Result query(const QV4::String *);
-    Result query(const QV4::String *, const void *importNamespace);
+    Result query(const QHashedStringRef &) const;
+    Result query(const QHashedStringRef &, const QQmlImportRef *importNamespace) const;
+    Result query(const QV4::String *, QQmlImport::RecursionRestriction recursionRestriction = QQmlImport::PreventRecursion) const;
+    Result query(const QV4::String *, const QQmlImportRef *importNamespace) const;
 
 private:
     friend class QQmlImports;
 
-    struct Import {
-        inline Import();
-        // Imported module
-        QVector<QQmlTypeModuleVersion> modules;
-
-        // Or, imported script
-        int scriptIndex;
-
-        // Or, imported compositeSingletons
-        QStringHash<QUrl> compositeSingletons;
-    };
-
     template<typename Key>
-    Result query(const QStringHash<Import> &imports, Key key)
+    Result query(const QStringHash<QQmlImportRef> &imports, Key key) const
     {
-        Import *i = imports.value(key);
+        QQmlImportRef *i = imports.value(key);
         if (i) {
+            Q_ASSERT(!i->m_qualifier.isEmpty());
             if (i->scriptIndex != -1) {
                 return Result(i->scriptIndex);
             } else {
-                return Result(static_cast<const void *>(i));
+                return Result(i);
             }
         }
 
@@ -123,53 +130,54 @@ private:
     }
 
     template<typename Key>
-    Result query(const QStringHash<QUrl> &urls, Key key)
+    Result query(const QStringHash<QUrl> &urls, Key key) const
     {
         QUrl *url = urls.value(key);
         if (url) {
-            QQmlType *type = QQmlMetaType::qmlType(*url);
-            if (type)
-                return Result(type);
+            QQmlType type = QQmlMetaType::qmlType(*url);
+            return Result(type);
         }
 
         return Result();
     }
 
     template<typename Key>
-    Result typeSearch(const QVector<QQmlTypeModuleVersion> &modules, Key key)
+    Result typeSearch(const QVector<QQmlTypeModuleVersion> &modules, Key key) const
     {
         QVector<QQmlTypeModuleVersion>::const_iterator end = modules.constEnd();
         for (QVector<QQmlTypeModuleVersion>::const_iterator it = modules.constBegin(); it != end; ++it) {
-            if (QQmlType *type = it->type(key))
+            QQmlType type = it->type(key);
+            if (type.isValid())
                 return Result(type);
         }
 
         return Result();
     }
 
-    QStringHash<Import> m_namedImports;
-    QMap<const Import *, QStringHash<Import> > m_namespacedImports;
+    QStringHash<QQmlImportRef> m_namedImports;
+    QMap<const QQmlImportRef *, QStringHash<QQmlImportRef> > m_namespacedImports;
     QVector<QQmlTypeModuleVersion> m_anonymousImports;
     QStringHash<QUrl> m_anonymousCompositeSingletons;
+    QQmlImports m_imports;
 };
 
 QQmlTypeNameCache::Result::Result()
-: type(0), importNamespace(0), scriptIndex(-1)
+: importNamespace(0), scriptIndex(-1)
 {
 }
 
-QQmlTypeNameCache::Result::Result(const void *importNamespace)
-: type(0), importNamespace(importNamespace), scriptIndex(-1)
+QQmlTypeNameCache::Result::Result(const QQmlImportRef *importNamespace)
+: importNamespace(importNamespace), scriptIndex(-1)
 {
 }
 
-QQmlTypeNameCache::Result::Result(QQmlType *type)
+QQmlTypeNameCache::Result::Result(const QQmlType &type)
 : type(type), importNamespace(0), scriptIndex(-1)
 {
 }
 
 QQmlTypeNameCache::Result::Result(int scriptIndex)
-: type(0), importNamespace(0), scriptIndex(scriptIndex)
+: importNamespace(0), scriptIndex(scriptIndex)
 {
 }
 
@@ -180,12 +188,7 @@ QQmlTypeNameCache::Result::Result(const Result &o)
 
 bool QQmlTypeNameCache::Result::isValid() const
 {
-    return type || importNamespace || scriptIndex != -1;
-}
-
-QQmlTypeNameCache::Import::Import()
-: scriptIndex(-1)
-{
+    return type.isValid() || importNamespace || scriptIndex != -1;
 }
 
 bool QQmlTypeNameCache::isEmpty() const

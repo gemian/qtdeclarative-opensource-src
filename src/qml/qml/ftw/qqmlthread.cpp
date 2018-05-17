@@ -55,7 +55,7 @@ public:
     QQmlThreadPrivate(QQmlThread *);
     QQmlThread *q;
 
-    virtual void run();
+    void run() override;
 
     inline void lock() { _mutex.lock(); }
     inline void unlock() { _mutex.unlock(); }
@@ -81,12 +81,12 @@ public:
     void threadEvent();
 
 protected:
-    virtual bool event(QEvent *);
+    bool event(QEvent *) override;
 
 private:
     struct MainObject : public QObject {
         MainObject(QQmlThreadPrivate *p);
-        virtual bool event(QEvent *e);
+        bool event(QEvent *e) override;
         QQmlThreadPrivate *p;
     };
     MainObject m_mainObject;
@@ -233,20 +233,27 @@ void QQmlThread::shutdown()
 {
     d->lock();
     Q_ASSERT(!d->m_shutdown);
-    d->m_shutdown = true;
-    if (d->threadList.isEmpty() && d->m_threadProcessing == false) {
-        if (QCoreApplication::closingDown()) {
-            d->quit();
+
+    for (;;) {
+        if (d->mainSync || !d->mainList.isEmpty()) {
             d->unlock();
-            d->QThread::wait();
-            return;
+            d->mainEvent();
+            d->lock();
+        } else if (!d->threadList.isEmpty()) {
+            d->wait();
         } else {
-            d->triggerThreadEvent();
+            break;
         }
-    } else if (d->mainSync) {
-        d->wakeOne();
     }
-    d->wait();
+
+    d->m_shutdown = true;
+    if (QCoreApplication::closingDown()) {
+        d->quit();
+    } else {
+        d->triggerThreadEvent();
+        d->wait();
+    }
+
     d->unlock();
     d->QThread::wait();
 }

@@ -42,6 +42,7 @@
 #include <QtQml/qqmlinfo.h>
 #include <QImage>
 #include <QDebug>
+#include <QRandomGenerator>
 QT_BEGIN_NAMESPACE
 /*!
     \qmltype MaskShape
@@ -94,7 +95,7 @@ void QQuickMaskExtruder::startMaskLoading()
 void QQuickMaskExtruder::finishMaskLoading()
 {
     if (m_pix.isError())
-        qmlInfo(this) << m_pix.error();
+        qmlWarning(this) << m_pix.error();
 }
 
 QPointF QQuickMaskExtruder::extrude(const QRectF &r)
@@ -102,7 +103,7 @@ QPointF QQuickMaskExtruder::extrude(const QRectF &r)
     ensureInitialized(r);
     if (!m_mask.count() || m_img.isNull())
         return r.topLeft();
-    const QPointF p = m_mask[rand() % m_mask.count()];
+    const QPointF p = m_mask[QRandomGenerator::global()->bounded(m_mask.count())];
     //### Should random sub-pixel positioning be added?
     return p + r.topLeft();
 }
@@ -153,3 +154,5 @@ void QQuickMaskExtruder::ensureInitialized(const QRectF &rf)
     }
 }
 QT_END_NAMESPACE
+
+#include "moc_qquickmaskextruder_p.cpp"

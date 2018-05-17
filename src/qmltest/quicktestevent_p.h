@@ -54,7 +54,27 @@
 #include <QtQuickTest/quicktestglobal.h>
 #include <QtCore/qobject.h>
 #include <QtGui/QWindow>
+#include <QtTest/qtesttouch.h>
+
 QT_BEGIN_NAMESPACE
+
+class QuickTestEvent;
+class Q_QUICK_TEST_EXPORT QQuickTouchEventSequence : public QObject
+{
+    Q_OBJECT
+public:
+    explicit QQuickTouchEventSequence(QuickTestEvent *testEvent, QObject *item = nullptr);
+public slots:
+    QObject* press(int touchId, QObject *item, qreal x, qreal y);
+    QObject* move(int touchId, QObject *item, qreal x, qreal y);
+    QObject* release(int touchId, QObject *item, qreal x, qreal y);
+    QObject* stationary(int touchId);
+    QObject* commit();
+
+private:
+    QTest::QTouchEventSequence m_sequence;
+    QuickTestEvent * const m_testEvent;
+};
 
 class Q_QUICK_TEST_EXPORT QuickTestEvent : public QObject
 {
@@ -74,6 +94,8 @@ public Q_SLOTS:
     bool keyReleaseChar(const QString &character, int modifiers, int delay);
     bool keyClickChar(const QString &character, int modifiers, int delay);
 
+    Q_REVISION(2) bool keySequence(const QVariant &keySequence);
+
     bool mousePress(QObject *item, qreal x, qreal y, int button,
                     int modifiers, int delay);
     bool mouseRelease(QObject *item, qreal x, qreal y, int button,
@@ -86,14 +108,18 @@ public Q_SLOTS:
                           int modifiers, int delay);
     bool mouseMove(QObject *item, qreal x, qreal y, int delay, int buttons);
 
-#ifndef QT_NO_WHEELEVENT
+#if QT_CONFIG(wheelevent)
     bool mouseWheel(QObject *item, qreal x, qreal y, int buttons,
                int modifiers, int xDelta, int yDelta, int delay);
 #endif
 
+    QQuickTouchEventSequence *touchEvent(QObject *item = nullptr);
 private:
     QWindow *eventWindow(QObject *item = 0);
     QWindow *activeWindow();
+    QTouchDevice *touchDevice();
+
+    friend class QQuickTouchEventSequence;
 };
 
 QT_END_NAMESPACE

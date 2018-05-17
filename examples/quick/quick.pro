@@ -16,7 +16,6 @@ SUBDIRS =   quick-accessibility \
             scenegraph \
             shadereffects \
             text \
-            textureprovider \
             threading \
             touchinteraction \
             tutorials \
@@ -25,13 +24,20 @@ SUBDIRS =   quick-accessibility \
             imageresponseprovider \
             window \
             particles \
-            demos \
-            rendercontrol
+            shapes \
+            demos
+
+#OpenGL Support Required
+qtConfig(opengl(es1|es2)?) {
+    SUBDIRS += \
+    textureprovider \
+    rendercontrol
+}
 
 # Widget dependent examples
 qtHaveModule(widgets) {
     SUBDIRS += embeddedinwidgets
-    qtHaveModule(quickwidgets): SUBDIRS += quickwidgets
+    qtHaveModule(quickwidgets):qtConfig(opengl(es1|es2)?): SUBDIRS += quickwidgets
 }
 
 EXAMPLE_FILES = \

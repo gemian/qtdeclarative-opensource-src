@@ -39,7 +39,6 @@
 
 #include "qqmlcustomparser_p.h"
 
-#include "qqmlcompiler_p.h"
 #include <private/qqmltypecompiler_p.h>
 
 #include <QtCore/qdebug.h>
@@ -84,7 +83,7 @@ QT_BEGIN_NAMESPACE
     by \a data, which is a block of data previously returned by a call
     to compile().
 
-    Errors should be reported using qmlInfo(object).
+    Errors should be reported using qmlWarning(object).
 
     The \a object will be an instance of the TypeClass specified by QML_REGISTER_CUSTOM_TYPE.
 */
@@ -101,11 +100,7 @@ void QQmlCustomParser::clearErrors()
 */
 void QQmlCustomParser::error(const QV4::CompiledData::Location &location, const QString &description)
 {
-    QQmlError error;
-    error.setLine(location.line);
-    error.setColumn(location.column);
-    error.setDescription(description);
-    exceptions << error;
+    exceptions << QQmlCompileError(location, description);
 }
 
 struct StaticQtMetaObject : public QObject
@@ -126,18 +121,21 @@ int QQmlCustomParser::evaluateEnum(const QByteArray& script, bool *ok) const
 {
     Q_ASSERT_X(ok, "QQmlCustomParser::evaluateEnum", "ok must not be a null pointer");
     *ok = false;
+
+    // we support one or two '.' in the enum phrase:
+    // * <TypeName>.<EnumValue>
+    // * <TypeName>.<ScopedEnumName>.<EnumValue>
+
     int dot = script.indexOf('.');
-    if (dot == -1)
+    if (dot == -1 || dot == script.length()-1)
         return -1;
 
-
     QString scope = QString::fromUtf8(script.left(dot));
-    QByteArray enumValue = script.mid(dot+1);
 
     if (scope != QLatin1String("Qt")) {
         if (imports.isNull())
             return -1;
-        QQmlType *type = 0;
+        QQmlType type;
 
         if (imports.isT1()) {
             imports.asT1()->resolveType(scope, &type, 0, 0, 0);
@@ -147,9 +145,20 @@ int QQmlCustomParser::evaluateEnum(const QByteArray& script, bool *ok) const
                 type = result.type;
         }
 
-        return type ? type->enumValue(engine, QHashedCStringRef(enumValue.constData(), enumValue.length()), ok) : -1;
+        if (!type.isValid())
+            return -1;
+
+        int dot2 = script.indexOf('.', dot+1);
+        const bool dot2Valid = dot2 != -1 && dot2 != script.length()-1;
+        QByteArray enumValue = script.mid(dot2Valid ? dot2 + 1 : dot + 1);
+        QByteArray scopedEnumName = (dot2Valid ? script.mid(dot + 1, dot2 - dot - 1) : QByteArray());
+        if (!scopedEnumName.isEmpty())
+            return type.scopedEnumValue(engine, scopedEnumName, enumValue, ok);
+        else
+            return type.enumValue(engine, QHashedCStringRef(enumValue.constData(), enumValue.length()), ok);
     }
 
+    QByteArray enumValue = script.mid(dot + 1);
     const QMetaObject *mo = StaticQtMetaObject::get();
     int i = mo->enumeratorCount();
     while (i--) {
@@ -166,12 +175,12 @@ int QQmlCustomParser::evaluateEnum(const QByteArray& script, bool *ok) const
 */
 const QMetaObject *QQmlCustomParser::resolveType(const QString& name) const
 {
-    QQmlType *qmltype = 0;
-    if (!validator->imports().resolveType(name, &qmltype, 0, 0, 0))
-        return 0;
-    if (!qmltype)
-        return 0;
-    return qmltype->metaObject();
+    if (!imports.isT1())
+        return nullptr;
+    QQmlType qmltype;
+    if (!imports.asT1()->resolveType(name, &qmltype, 0, 0, 0))
+        return nullptr;
+    return qmltype.metaObject();
 }
 
 QT_END_NAMESPACE

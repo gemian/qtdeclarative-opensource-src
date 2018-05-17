@@ -51,7 +51,9 @@
 //
 
 #include "qv4global_p.h"
+#include <private/qqmlglobal_p.h>
 #include <private/qv4compileddata_p.h>
+#include <private/qv4context_p.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -67,7 +69,8 @@ struct Q_QML_EXPORT Function {
     // first nArguments names in internalClass are the actual arguments
     InternalClass *internalClass;
     uint nFormals;
-    bool activationRequired;
+    bool hasQmlDependencies;
+    bool canUseSimpleCall;
 
     Function(ExecutionEngine *engine, CompiledData::CompilationUnit *unit, const CompiledData::Function *function,
              ReturnedValue (*codePtr)(ExecutionEngine *, const uchar *));
@@ -80,15 +83,27 @@ struct Q_QML_EXPORT Function {
         return compilationUnit->runtimeStrings[compiledFunction->nameIndex];
     }
     inline QString sourceFile() const { return compilationUnit->fileName(); }
+    inline QUrl finalUrl() const { return compilationUnit->finalUrl(); }
 
     inline bool usesArgumentsObject() const { return compiledFunction->flags & CompiledData::Function::UsesArgumentsObject; }
     inline bool isStrict() const { return compiledFunction->flags & CompiledData::Function::IsStrict; }
     inline bool isNamedExpression() const { return compiledFunction->flags & CompiledData::Function::IsNamedExpression; }
 
-    inline bool needsActivation() const
-    { return activationRequired; }
+    inline bool canUseSimpleFunction() const { return canUseSimpleCall; }
+
+    QQmlSourceLocation sourceLocation() const
+    {
+        return QQmlSourceLocation(sourceFile(), compiledFunction->location.line, compiledFunction->location.column);
+    }
 
 };
+
+
+inline unsigned int Heap::SimpleCallContext::formalParameterCount() const
+{
+    return v4Function ? v4Function->nFormals : 0;
+}
+
 
 }
 

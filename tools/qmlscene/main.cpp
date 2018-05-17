@@ -33,6 +33,7 @@
 #include <QtCore/qpointer.h>
 #include <QtCore/qscopedpointer.h>
 #include <QtCore/qtextstream.h>
+#include <QtCore/qregularexpression.h>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QOpenGLFunctions>
@@ -132,6 +133,17 @@ void RenderStatistics::printTotalStats()
 
 struct Options
 {
+    enum QmlApplicationType
+    {
+        QmlApplicationTypeGui,
+        QmlApplicationTypeWidget,
+#ifdef QT_WIDGETS_LIB
+        DefaultQmlApplicationType = QmlApplicationTypeWidget
+#else
+        DefaultQmlApplicationType = QmlApplicationTypeGui
+#endif
+    };
+
     Options()
         : originalQml(false)
         , originalQmlRaster(false)
@@ -144,7 +156,10 @@ struct Options
         , quitImmediately(false)
         , resizeViewToRootItem(false)
         , multisample(false)
+        , coreProfile(false)
         , verbose(false)
+        , applicationType(DefaultQmlApplicationType)
+        , textRenderType(QQuickWindow::textRenderType())
     {
         // QtWebEngine needs a shared context in order for the GPU thread to
         // upload textures.
@@ -163,9 +178,12 @@ struct Options
     bool quitImmediately;
     bool resizeViewToRootItem;
     bool multisample;
+    bool coreProfile;
     bool verbose;
     QVector<Qt::ApplicationAttribute> applicationAttributes;
     QString translationFile;
+    QmlApplicationType applicationType;
+    QQuickWindow::TextRenderType textRenderType;
 };
 
 #if defined(QMLSCENE_BUNDLE)
@@ -175,10 +193,10 @@ QFileInfoList findQmlFiles(const QString &dirName)
 
     QFileInfoList ret;
     if (dir.exists()) {
-        QFileInfoList fileInfos = dir.entryInfoList(QStringList() << "*.qml",
-                                                    QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot);
+        const QFileInfoList fileInfos = dir.entryInfoList(QStringList() << "*.qml",
+                                                          QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot);
 
-        foreach (QFileInfo fileInfo, fileInfos) {
+        for (const QFileInfo &fileInfo : fileInfos) {
             if (fileInfo.isDir())
                 ret += findQmlFiles(fileInfo.filePath());
             else if (fileInfo.fileName().length() > 0 && fileInfo.fileName().at(0).isLower())
@@ -196,9 +214,9 @@ static int displayOptionsDialog(Options *options)
     QFormLayout *layout = new QFormLayout(&dialog);
 
     QComboBox *qmlFileComboBox = new QComboBox(&dialog);
-    QFileInfoList fileInfos = findQmlFiles(":/bundle") + findQmlFiles("./qmlscene-resources");
+    const QFileInfoList fileInfos = findQmlFiles(":/bundle") + findQmlFiles("./qmlscene-resources");
 
-    foreach (QFileInfo fileInfo, fileInfos)
+    for (const QFileInfo &fileInfo : fileInfos)
         qmlFileComboBox->addItem(fileInfo.dir().dirName() + QLatin1Char('/') + fileInfo.fileName(), QVariant::fromValue(fileInfo));
 
     QCheckBox *originalCheckBox = new QCheckBox(&dialog);
@@ -258,8 +276,8 @@ static bool checkVersion(const QUrl &url)
         return false;
     }
 
-    QRegExp quick1("^\\s*import +QtQuick +1\\.\\w*");
-    QRegExp qt47("^\\s*import +Qt +4\\.7");
+    QRegularExpression quick1("^\\s*import +QtQuick +1\\.\\w*");
+    QRegularExpression qt47("^\\s*import +Qt +4\\.7");
 
     QTextStream stream(&f);
     bool codeFound= false;
@@ -269,10 +287,11 @@ static bool checkVersion(const QUrl &url)
             codeFound = true;
         } else {
             QString import;
-            if (quick1.indexIn(line) >= 0)
-                import = quick1.cap(0).trimmed();
-            else if (qt47.indexIn(line) >= 0)
-                import = qt47.cap(0).trimmed();
+            QRegularExpressionMatch match = quick1.match(line);
+            if (match.hasMatch())
+                import = match.captured(0).trimmed();
+            else if ((match = qt47.match(line)).hasMatch())
+                import = match.captured(0).trimmed();
 
             if (!import.isNull()) {
                 fprintf(stderr, "qmlscene: '%s' is no longer supported.\n"
@@ -289,19 +308,21 @@ static bool checkVersion(const QUrl &url)
 
 static void displayFileDialog(Options *options)
 {
-#if defined(QT_WIDGETS_LIB) && !defined(QT_NO_FILEDIALOG)
-    QString fileName = QFileDialog::getOpenFileName(0, "Open QML file", QString(), "QML Files (*.qml)");
-    if (!fileName.isEmpty()) {
-        QFileInfo fi(fileName);
-        options->url = QUrl::fromLocalFile(fi.canonicalFilePath());
+#if defined(QT_WIDGETS_LIB) && QT_CONFIG(filedialog)
+    if (options->applicationType == Options::QmlApplicationTypeWidget) {
+        QString fileName = QFileDialog::getOpenFileName(0, "Open QML file", QString(), "QML Files (*.qml)");
+        if (!fileName.isEmpty()) {
+            QFileInfo fi(fileName);
+            options->url = QUrl::fromLocalFile(fi.canonicalFilePath());
+        }
+        return;
     }
-#else
+#endif // QT_WIDGETS_LIB && QT_CONFIG(filedialog)
     Q_UNUSED(options);
     puts("No filename specified...");
-#endif
 }
 
-#ifndef QT_NO_TRANSLATION
+#if QT_CONFIG(translation)
 static void loadTranslationFile(QTranslator &translator, const QString& directory)
 {
     translator.load(QLatin1String("qml_" )+QLocale::system().name(), directory + QLatin1String("/i18n"));
@@ -319,8 +340,8 @@ static void loadDummyDataFiles(QQmlEngine &engine, const QString& directory)
         QObject *dummyData = comp.create();
 
         if(comp.isError()) {
-            QList<QQmlError> errors = comp.errors();
-            foreach (const QQmlError &error, errors)
+            const QList<QQmlError> errors = comp.errors();
+            for (const QQmlError &error : errors)
                 fprintf(stderr, "%s\n", qPrintable(error.toString()));
         }
 
@@ -342,6 +363,7 @@ static void usage()
     puts("  --fullscreen ..................... Run fullscreen");
     puts("  --transparent .................... Make the window transparent");
     puts("  --multisample .................... Enable multisampling (OpenGL anti-aliasing)");
+    puts("  --core-profile ................... Request a core profile OpenGL context");
     puts("  --no-version-detection ........... Do not try to detect the version of the .qml file");
     puts("  --slow-animations ................ Run all animations in slow motion");
     puts("  --resize-to-root ................. Resize the window to the size of the root item");
@@ -354,6 +376,10 @@ static void usage()
     puts("  --scaling..........................Enable High DPI scaling (AA_EnableHighDpiScaling)");
     puts("  --no-scaling.......................Disable High DPI scaling (AA_DisableHighDpiScaling)");
     puts("  --verbose..........................Print version and graphical diagnostics for the run-time");
+#ifdef QT_WIDGETS_LIB
+    puts("  --apptype [gui|widgets] ...........Select which application class to use. Default is widgets.");
+#endif
+    puts("  --textrendertype [qt|native].......Select the default render type for text-like elements.");
     puts("  -I <path> ........................ Add <path> to the list of import paths");
     puts("  -P <path> ........................ Add <path> to the list of plugin paths");
     puts("  -translation <translationfile> ... Set the language to run in");
@@ -361,7 +387,7 @@ static void usage()
     puts(" ");
     exit(1);
 }
-
+#if QT_CONFIG(opengl)
 // Listen on GL context creation of the QQuickWindow in order to print diagnostic output.
 class DiagnosticGlContextCreationListener : public QObject {
     Q_OBJECT
@@ -389,7 +415,9 @@ private slots:
         context->doneCurrent();
         deleteLater();
     }
+
 };
+#endif
 
 static void setWindowTitle(bool verbose, const QObject *topLevel, QWindow *window)
 {
@@ -403,8 +431,10 @@ static void setWindowTitle(bool verbose, const QObject *topLevel, QWindow *windo
     if (verbose) {
         newTitle += QLatin1String(" [Qt ") + QLatin1String(QT_VERSION_STR) + QLatin1Char(' ')
             + QGuiApplication::platformName() + QLatin1Char(' ');
+#if QT_CONFIG(opengl)
         newTitle += QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGL
             ? QLatin1String("GL") : QLatin1String("GLES");
+#endif
         newTitle += QLatin1Char(']');
     }
     if (oldTitle != newTitle)
@@ -429,6 +459,19 @@ static QUrl parseUrlArgument(const QString &arg)
     return url;
 }
 
+static QQuickWindow::TextRenderType parseTextRenderType(const QString &renderType)
+{
+    if (renderType == QLatin1String("qt"))
+        return QQuickWindow::QtTextRendering;
+    else if (renderType == QLatin1String("native"))
+        return QQuickWindow::NativeTextRendering;
+
+    usage();
+
+    Q_UNREACHABLE();
+    return QQuickWindow::QtTextRendering;
+}
+
 int main(int argc, char ** argv)
 {
     Options options;
@@ -439,30 +482,39 @@ int main(int argc, char ** argv)
     // Parse arguments for application attributes to be applied before Q[Gui]Application creation.
     for (int i = 1; i < argc; ++i) {
         const char *arg = argv[i];
-        if (!qstrcmp(arg, "--disable-context-sharing"))
+        if (!qstrcmp(arg, "--disable-context-sharing")) {
             options.applicationAttributes.removeAll(Qt::AA_ShareOpenGLContexts);
-        else if (!qstrcmp(arg, "--gles"))
+        } else if (!qstrcmp(arg, "--gles")) {
             options.applicationAttributes.append(Qt::AA_UseOpenGLES);
-        else if (!qstrcmp(arg, "--software"))
+        } else if (!qstrcmp(arg, "--software")) {
             options.applicationAttributes.append(Qt::AA_UseSoftwareOpenGL);
-        else if (!qstrcmp(arg, "--desktop"))
+        } else if (!qstrcmp(arg, "--desktop")) {
             options.applicationAttributes.append(Qt::AA_UseDesktopOpenGL);
-        else if (!qstrcmp(arg, "--scaling"))
+        } else if (!qstrcmp(arg, "--scaling")) {
             options.applicationAttributes.append(Qt::AA_EnableHighDpiScaling);
-        else if (!qstrcmp(arg, "--no-scaling"))
+        } else if (!qstrcmp(arg, "--no-scaling")) {
             options.applicationAttributes.append(Qt::AA_DisableHighDpiScaling);
+        } else if (!qstrcmp(arg, "--apptype")) {
+            if (++i >= argc)
+                usage();
+            if (!qstrcmp(argv[i], "gui"))
+                options.applicationType = Options::QmlApplicationTypeGui;
+        }
     }
 
-    foreach (Qt::ApplicationAttribute a, options.applicationAttributes)
+    for (Qt::ApplicationAttribute a : qAsConst(options.applicationAttributes))
         QCoreApplication::setAttribute(a);
+    QScopedPointer<QGuiApplication> app;
 #ifdef QT_WIDGETS_LIB
-    QApplication app(argc, argv);
-#else
-    QGuiApplication app(argc, argv);
+    if (options.applicationType == Options::QmlApplicationTypeWidget)
+        app.reset(new QApplication(argc, argv));
 #endif
-    app.setApplicationName("QtQmlViewer");
-    app.setOrganizationName("QtProject");
-    app.setOrganizationDomain("qt-project.org");
+    if (app.isNull())
+        app.reset(new QGuiApplication(argc, argv));
+    QCoreApplication::setApplicationName(QStringLiteral("QtQmlViewer"));
+    QCoreApplication::setOrganizationName(QStringLiteral("QtProject"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("qt-project.org"));
+    QCoreApplication::setApplicationVersion(QLatin1String(QT_VERSION_STR));
 
     const QStringList arguments = QCoreApplication::arguments();
     for (int i = 1, size = arguments.size(); i < size; ++i) {
@@ -490,12 +542,18 @@ int main(int argc, char ** argv)
                 options.resizeViewToRootItem = true;
             else if (lowerArgument == QLatin1String("--multisample"))
                 options.multisample = true;
+            else if (lowerArgument == QLatin1String("--core-profile"))
+                options.coreProfile = true;
             else if (lowerArgument == QLatin1String("--verbose"))
                 options.verbose = true;
             else if (lowerArgument == QLatin1String("-i") && i + 1 < size)
                 imports.append(arguments.at(++i));
             else if (lowerArgument == QLatin1String("-p") && i + 1 < size)
                 pluginPaths.append(arguments.at(++i));
+            else if (lowerArgument == QLatin1String("--apptype"))
+                ++i; // Consume previously parsed argument
+            else if (lowerArgument == QLatin1String("--textrendertype") && i + 1 < size)
+                options.textRenderType = parseTextRenderType(arguments.at(++i));
             else if (lowerArgument == QLatin1String("--help")
                      || lowerArgument == QLatin1String("-help")
                      || lowerArgument == QLatin1String("--h")
@@ -504,25 +562,27 @@ int main(int argc, char ** argv)
         }
     }
 
-#ifndef QT_NO_TRANSLATION
+#if QT_CONFIG(translation)
     QTranslator translator;
     QTranslator qtTranslator;
     QString sysLocale = QLocale::system().name();
     if (qtTranslator.load(QLatin1String("qt_") + sysLocale, QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
-        app.installTranslator(&qtTranslator);
+        app->installTranslator(&qtTranslator);
     if (translator.load(QLatin1String("qmlscene_") + sysLocale, QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
-        app.installTranslator(&translator);
+        app->installTranslator(&translator);
 
     QTranslator qmlTranslator;
     if (!options.translationFile.isEmpty()) {
         if (qmlTranslator.load(options.translationFile)) {
-            app.installTranslator(&qmlTranslator);
+            app->installTranslator(&qmlTranslator);
         } else {
             fprintf(stderr, "Could not load the translation file \"%s\"\n",
                     qPrintable(options.translationFile));
         }
     }
 #endif
+
+    QQuickWindow::setTextRenderType(options.textRenderType);
 
     QUnifiedTimer::instance()->setSlowModeEnabled(options.slowAnimations);
 
@@ -540,7 +600,7 @@ int main(int argc, char ** argv)
 
     if (!options.url.isEmpty()) {
         if (!options.versionDetection || checkVersion(options.url)) {
-#ifndef QT_NO_TRANSLATION
+#if QT_CONFIG(translation)
             QTranslator translator;
 #endif
 
@@ -554,12 +614,13 @@ int main(int argc, char ** argv)
                 engine.addPluginPath(pluginPaths.at(i));
             if (options.url.isLocalFile()) {
                 QFileInfo fi(options.url.toLocalFile());
-#ifndef QT_NO_TRANSLATION
+#if QT_CONFIG(translation)
                 loadTranslationFile(translator, fi.path());
 #endif
                 loadDummyDataFiles(engine, fi.path());
             }
             QObject::connect(&engine, SIGNAL(quit()), QCoreApplication::instance(), SLOT(quit()));
+            QObject::connect(&engine, &QQmlEngine::exit, QCoreApplication::instance(), &QCoreApplication::exit);
             component->loadUrl(options.url);
             while (component->isLoading())
                 QCoreApplication::processEvents();
@@ -592,8 +653,10 @@ int main(int argc, char ** argv)
 
             if (window) {
                 setWindowTitle(options.verbose, topLevel, window.data());
+#if QT_CONFIG(opengl)
                 if (options.verbose)
                     new DiagnosticGlContextCreationListener(window.data());
+#endif
                 QSurfaceFormat surfaceFormat = window->requestedFormat();
                 if (options.multisample)
                     surfaceFormat.setSamples(16);
@@ -602,6 +665,10 @@ int main(int argc, char ** argv)
                     window->setClearBeforeRendering(true);
                     window->setColor(QColor(Qt::transparent));
                     window->setFlags(Qt::FramelessWindowHint);
+                }
+                if (options.coreProfile) {
+                    surfaceFormat.setVersion(4, 1);
+                    surfaceFormat.setProfile(QSurfaceFormat::CoreProfile);
                 }
                 window->setFormat(surfaceFormat);
 
@@ -621,7 +688,7 @@ int main(int argc, char ** argv)
 
             // Now would be a good time to inform the debug service to start listening.
 
-            exitCode = app.exec();
+            exitCode = app->exec();
 
 #ifdef QML_RUNTIME_TESTING
             RenderStatistics::printTotalStats();

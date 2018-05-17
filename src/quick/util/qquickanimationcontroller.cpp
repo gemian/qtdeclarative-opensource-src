@@ -50,8 +50,8 @@ class QQuickAnimationControllerPrivate : public QObjectPrivate, QAnimationJobCha
 public:
     QQuickAnimationControllerPrivate()
         : progress(0.0), animation(0), animationInstance(0), finalized(false) {}
-    virtual void animationFinished(QAbstractAnimationJob *job);
-    virtual void animationCurrentTimeChanged(QAbstractAnimationJob *job, int currentTime);
+    void animationFinished(QAbstractAnimationJob *job) override;
+    void animationCurrentTimeChanged(QAbstractAnimationJob *job, int currentTime) override;
 
 
     qreal progress;
@@ -169,7 +169,7 @@ void QQuickAnimationController::setAnimation(QQuickAbstractAnimation *animation)
     if (animation != d->animation) {
         if (animation) {
             if (animation->userControlDisabled()) {
-                qmlInfo(this) << "QQuickAnimationController::setAnimation: the animation is controlled by others, can't be used in AnimationController.";
+                qmlWarning(this) << "QQuickAnimationController::setAnimation: the animation is controlled by others, can't be used in AnimationController.";
                 return;
             }
             animation->setDisableUserControl();
@@ -223,7 +223,7 @@ void QQuickAnimationController::updateProgress()
 
     d->animationInstance->setDisableUserControl();
     d->animationInstance->start();
-    QQmlAnimationTimer::unregisterAnimation(d->animationInstance);
+    QQmlAnimationTimer::instance()->unregisterAnimation(d->animationInstance);
     d->animationInstance->setCurrentTime(d->progress * d->animationInstance->duration());
 }
 
@@ -297,3 +297,4 @@ void QQuickAnimationController::completeToEnd()
 QT_END_NAMESPACE
 
 
+#include "moc_qquickanimationcontroller_p.cpp"

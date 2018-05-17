@@ -17,4 +17,6 @@ FORMS += \
     pane.ui \
     import.ui
 
+QMAKE_TARGET_DESCRIPTION = QML Easing Curve Editor
+
 load(qt_app)

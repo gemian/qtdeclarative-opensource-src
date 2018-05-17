@@ -1,12 +1,22 @@
  /****************************************************************************
 **
-** Copyright (C) 2015 The Qt Company Ltd.
-** Contact: http://www.qt.io/licensing/
+** Copyright (C) 2017 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the examples of the Qt Toolkit.
 **
 ** $QT_BEGIN_LICENSE:BSD$
-** You may use this file under the terms of the BSD license as follows:
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
+**
+** BSD License Usage
+** Alternatively, you may use this file under the terms of the BSD license
+** as follows:
 **
 ** "Redistribution and use in source and binary forms, with or without
 ** modification, are permitted provided that the following conditions are
@@ -39,30 +49,59 @@
 ****************************************************************************/
 
 //![0]
+var db = LocalStorage.openDatabaseSync("ActivityTrackDB", "", "Database tracking sports activities", 1000000);
 db.transaction(
     try {
         function(tx) {
-            tx.executeSql('INSERT INTO Greeting VALUES(?, ?)', [ 'hello', 'world' ]);
+            tx.executeSql("INSERT INTO trip_log VALUES(?, ?, ?)",
+                          [ "01/10/2016","Sylling - Vikersund", "53" ]);
         }
     }   catch (err) {
-            console.log("Error inserting into table Greeting");
+            console.log("Error inserting into table trip_log: " + err);
         }
 )
 //![0]
 
 //![1]
+// Retrieve activity date, description and distance based on minimum
+// distance parameter Pdistance
+function db_distance_select(Pdistance)
+{
+var db = LocalStorage.openDatabaseSync("ActivityTrackDB", "", "Database tracking sports activities", 1000000);
 db.transaction(
     function(tx) {
-        var results = tx.executeSql('SELECT salutation FROM Greeting WHERE salutee=?;', 'world');
+        var results = tx.executeSql("SELECT rowid,
+                                            date,
+                                            trip_desc,
+                                            distance FROM trip_log
+                                     where distance >= ?",[Pdistance]);
+        for (var i = 0; i < results.rows.length; i++) {
+            listModel.append({"id": results.rows.item(i).rowid,
+                              "date": results.rows.item(i).date,
+                              "trip_desc": results.rows.item(i).trip_desc,
+                              "distance": results.rows.item(i).distance});
+        }
     }
-    console.log("We greeted in this most respectful way: " + results.rows.item(0).value);
-)
+}
 //![1]
 //![2]
-var db = LocalStorage.openDatabaseSync("QQmlExampleDB", "", "The Example QML SQL!", 1000000);
-if (db.version == '0.1') {
-    db.changeVersion('0.1', '0.2', function(tx) {
-        tx.executeSql('INSERT INTO Greeting VALUES(?, ?)', [ 'hello', 'world' ]);
+var db = LocalStorage.openDatabaseSync("ActivityTrackDB", "", "Database tracking sports activities", 1000000);
+if (db.version == "0.1") {
+    db.changeVersion("0.1", "0.2", function(tx) {
+        tx.executeSql("INSERT INTO trip_log VALUES(?, ?, ?)",
+                    [ "01/10/2016","Sylling - Vikersund", "53" ]);
     }
 });
 //![2]
+//![3]
+create table trip_log(date text, data text)
+//![3]
+//![4]
+var obj = {description = "Vikersund - Noresund", distance = "60"}
+//![4]
+//![5]
+db.transaction(function(tx) {
+    result = tx.executeSQL("insert into trip_log values (?,?)",
+                           ["01/11/2016", JSON.stringify(obj)])
+}
+//![5]
