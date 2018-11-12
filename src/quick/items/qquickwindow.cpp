@@ -690,8 +690,8 @@ bool QQuickWindowPrivate::deliverTouchAsMouse(QQuickItem *item, QQuickPointerEve
                 touchMouseId = p.id();
                 if (!q->mouseGrabberItem())
                     item->grabMouse();
-                auto pointerEventPoint = pointerEvent->pointById(p.id());
-                pointerEventPoint->setGrabberItem(item);
+                if (auto pointerEventPoint = pointerEvent->pointById(p.id()))
+                    pointerEventPoint->setGrabberItem(item);
 
                 if (checkIfDoubleClicked(event->timestamp())) {
                     QScopedPointer<QMouseEvent> mouseDoubleClick(touchToMouseEvent(QEvent::MouseButtonDblClick, p, event.data(), item, false));
@@ -1138,7 +1138,7 @@ void QQuickWindowPrivate::cleanup(QSGNode *n)
     \instantiates QQuickWindow
     \inqmlmodule QtQuick.Window
     \ingroup qtquick-visual
-    \brief Creates a new top-level window
+    \brief Creates a new top-level window.
 
     The Window object creates a new top-level window for a Qt Quick scene. It automatically sets up the
     window for use with \c {QtQuick 2.x} graphical types.
@@ -1175,7 +1175,7 @@ void QQuickWindowPrivate::cleanup(QSGNode *n)
 
     \inmodule QtQuick
 
-    \brief The QQuickWindow class provides the window for displaying a graphical QML scene
+    \brief The QQuickWindow class provides the window for displaying a graphical QML scene.
 
     QQuickWindow provides the graphical scene management needed to interact with and display
     a scene of QQuickItems.
@@ -2607,19 +2607,22 @@ void QQuickWindowPrivate::deliverMatchingPointsToItem(QQuickItem *item, QQuickPo
         // update accepted new points.
         bool isPressOrRelease = pointerEvent->isPressEvent() || pointerEvent->isReleaseEvent();
         for (auto point: qAsConst(touchEvent->touchPoints())) {
-            auto pointerEventPoint = ptEvent->pointById(point.id());
-            pointerEventPoint->setAccepted();
-            if (isPressOrRelease)
-                pointerEventPoint->setGrabberItem(item);
+            if (auto pointerEventPoint = ptEvent->pointById(point.id())) {
+                pointerEventPoint->setAccepted();
+                if (isPressOrRelease)
+                    pointerEventPoint->setGrabberItem(item);
+            }
         }
     } else {
         // But if the event was not accepted then we know this item
         // will not be interested in further updates for those touchpoint IDs either.
         for (auto point: qAsConst(touchEvent->touchPoints())) {
             if (point.state() == Qt::TouchPointPressed) {
-                if (ptEvent->pointById(point.id())->exclusiveGrabber() == item) {
-                    qCDebug(DBG_TOUCH_TARGET) << "TP" << hex << point.id() << "disassociated";
-                    ptEvent->pointById(point.id())->setGrabberItem(nullptr);
+                if (auto *tp = ptEvent->pointById(point.id())) {
+                    if (tp->exclusiveGrabber() == item) {
+                        qCDebug(DBG_TOUCH_TARGET) << "TP" << hex << point.id() << "disassociated";
+                        tp->setGrabberItem(nullptr);
+                    }
                 }
             }
         }
@@ -3632,7 +3635,7 @@ bool QQuickWindow::isSceneGraphInitialized() const
     \instantiates QQuickCloseEvent
     \inqmlmodule QtQuick.Window
     \ingroup qtquick-visual
-    \brief Notification that a \l Window is about to be closed
+    \brief Notification that a \l Window is about to be closed.
     \since 5.1
 
     Notification that a window is about to be closed by the windowing system

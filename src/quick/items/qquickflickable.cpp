@@ -594,7 +594,7 @@ void QQuickFlickablePrivate::updateBeginningEnd()
     \ingroup qtquick-input
     \ingroup qtquick-containers
 
-    \brief Provides a surface that can be "flicked"
+    \brief Provides a surface that can be "flicked".
     \inherits Item
 
     The Flickable item places its children on a surface that can be dragged
@@ -631,6 +631,31 @@ void QQuickFlickablePrivate::updateBeginningEnd()
     operating on the children of the Flickable; it is usually the children of
     \c contentItem that are relevant.  For example, the bound of Items added
     to the Flickable will be available by \c contentItem.childrenRect
+
+    \section1 Examples of contentX and contentY
+
+    The following images demonstrate a flickable being flicked in various
+    directions and the resulting \l contentX and \l contentY values.
+    The blue square represents the flickable's content, and the black
+    border represents the bounds of the flickable.
+
+    \table
+        \row
+            \li \image flickable-contentXY-resting.png
+            \li The \c contentX and \c contentY are both \c 0.
+        \row
+            \li \image flickable-contentXY-top-left.png
+            \li The \c contentX and the \c contentY are both \c 50.
+        \row
+            \li \image flickable-contentXY-top-right.png
+            \li The \c contentX is \c -50 and the \c contentY is \c 50.
+        \row
+            \li \image flickable-contentXY-bottom-right.png
+            \li The \c contentX and the \c contentY are both \c -50.
+        \row
+            \li \image flickable-contentXY-bottom-left.png
+            \li The \c contentX is \c 50 and the \c contentY is \c -50.
+    \endtable
 
     \section1 Limitations
 
@@ -737,7 +762,7 @@ QQuickFlickable::~QQuickFlickable()
     for the position; another way is to use the normalized values in
     \l {QtQuick::Flickable::visibleArea}{visibleArea}.
 
-    \sa originX, originY
+    \sa {Examples of contentX and contentY}, originX, originY
 */
 qreal QQuickFlickable::contentX() const
 {
@@ -2678,15 +2703,13 @@ void QQuickFlickable::movementEnding(bool hMovementEnding, bool vMovementEnding)
     if (hMovementEnding && d->hData.moving
             && (!d->pressed && !d->stealMouse)) {
         d->hData.moving = false;
-        if (!d->scrollingPhase)
-            d->hMoved = false;
+        d->hMoved = false;
         emit movingHorizontallyChanged();
     }
     if (vMovementEnding && d->vData.moving
             && (!d->pressed && !d->stealMouse)) {
         d->vData.moving = false;
-        if (!d->scrollingPhase)
-            d->vMoved = false;
+        d->vMoved = false;
         emit movingVerticallyChanged();
     }
     if (wasMoving && !isMoving()) {

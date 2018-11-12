@@ -385,7 +385,7 @@ private:
 class Q_QUICK_PRIVATE_EXPORT QQuickPointerEvent : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(const QQuickPointerDevice *device READ device)
+    Q_PROPERTY(QQuickPointerDevice *device READ device)
     Q_PROPERTY(Qt::KeyboardModifiers modifiers READ modifiers)
     Q_PROPERTY(Qt::MouseButtons button READ button)
     Q_PROPERTY(Qt::MouseButtons buttons READ buttons)
@@ -429,7 +429,7 @@ public: // helpers for C++ only (during event delivery)
     virtual bool allUpdatedPointsAccepted() const = 0;
     virtual bool allPointsGrabbed() const = 0;
     bool isAccepted() { return m_event->isAccepted(); }
-    void setAccepted(bool accepted) { m_event->setAccepted(accepted); }
+    void setAccepted(bool accepted) { if (m_event) m_event->setAccepted(accepted); }
     QVector<QPointF> unacceptedPressedPointScenePositions() const;
 
     virtual int pointCount() const = 0;

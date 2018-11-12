@@ -240,7 +240,11 @@ void QQuickPathViewPrivate::clear()
         releaseItem(currentItem);
         currentItem = nullptr;
     }
+
     for (QQuickItem *p : qAsConst(items))
+        releaseItem(p);
+
+    for (QQuickItem *p : qAsConst(itemCache))
         releaseItem(p);
 
     if (requestedIndex >= 0) {
@@ -250,6 +254,7 @@ void QQuickPathViewPrivate::clear()
     }
 
     items.clear();
+    itemCache.clear();
     tl.clear();
 }
 
@@ -475,7 +480,7 @@ void QQuickPathViewPrivate::setDragging(bool d)
     \ingroup qtquick-paths
     \ingroup qtquick-views
     \inherits Item
-    \brief Lays out model-provided items on a path
+    \brief Lays out model-provided items on a path.
 
     A PathView displays data from models created from built-in QML types like ListModel
     and XmlListModel, or custom model classes defined in C++ that inherit from

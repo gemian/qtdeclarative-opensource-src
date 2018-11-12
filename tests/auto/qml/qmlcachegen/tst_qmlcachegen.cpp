@@ -53,6 +53,7 @@ private slots:
 
     void workerScripts();
 
+    void trickyPaths_data();
     void trickyPaths();
 
     void scriptImport();
@@ -252,7 +253,7 @@ void tst_qmlcachegen::errorOnArgumentsInSignalHandler()
 
     QByteArray errorOutput;
     QVERIFY(!generateCache(testFilePath, &errorOutput));
-    QVERIFY2(errorOutput.contains("error: The use of the arguments object in signal handlers is"), errorOutput);
+    QVERIFY2(errorOutput.contains("error: The use of eval() or the use of the arguments object in signal handlers is"), errorOutput);
 }
 
 void tst_qmlcachegen::aheadOfTimeCompilation()
@@ -408,13 +409,26 @@ void tst_qmlcachegen::functionExpressions()
     QCOMPARE(obj->property("h_connections_handler_called").toBool(), true);
 }
 
+void tst_qmlcachegen::trickyPaths_data()
+{
+    QTest::addColumn<QString>("filePath");
+    QTest::newRow("path with spaces") << QStringLiteral(":/directory with spaces/file name with spaces.qml");
+    QTest::newRow("version style suffix 1") << QStringLiteral(":/directory with spaces/versionStyleSuffix-1.2-core-yc.qml");
+    QTest::newRow("version style suffix 2") << QStringLiteral(":/directory with spaces/versionStyleSuffix-1.2-more.qml");
+
+    // QTBUG-46375
+#if !defined(Q_OS_WIN)
+    QTest::newRow("path with umlaut") << QStringLiteral(":/Bäh.qml");
+#endif
+}
+
 void tst_qmlcachegen::trickyPaths()
 {
-    QString pathWithSpaces(QStringLiteral(":/directory with spaces/file name with spaces.qml"));
-    QVERIFY2(QFile::exists(pathWithSpaces), qPrintable(pathWithSpaces));
-    QCOMPARE(QFileInfo(pathWithSpaces).size(), 0);
+    QFETCH(QString, filePath);
+    QVERIFY2(QFile::exists(filePath), qPrintable(filePath));
+    QCOMPARE(QFileInfo(filePath).size(), 0);
     QQmlEngine engine;
-    QQmlComponent component(&engine, QUrl("qrc" + pathWithSpaces));
+    QQmlComponent component(&engine, QUrl("qrc" + filePath));
     QScopedPointer<QObject> obj(component.create());
     QVERIFY(!obj.isNull());
     QCOMPARE(obj->property("success").toInt(), 42);

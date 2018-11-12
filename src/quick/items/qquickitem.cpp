@@ -114,7 +114,7 @@ void debugFocusTree(QQuickItem *item, QQuickItem *scope = nullptr, int depth = 1
     \instantiates QQuickTransform
     \inqmlmodule QtQuick
     \ingroup qtquick-visual-transforms
-    \brief For specifying advanced transformations on Items
+    \brief For specifying advanced transformations on Items.
 
     The Transform type is a base type which cannot be instantiated directly.
     The following concrete Transform types are available:
@@ -357,7 +357,7 @@ void QQuickItemKeyFilter::componentComplete()
     \instantiates QQuickKeyNavigationAttached
     \inqmlmodule QtQuick
     \ingroup qtquick-input
-    \brief Supports key navigation by arrow keys
+    \brief Supports key navigation by arrow keys.
 
     Key-based user interfaces commonly allow the use of arrow keys to navigate between
     focusable items.  The KeyNavigation attached property enables this behavior by providing a
@@ -816,7 +816,7 @@ bool QQuickKeysAttached::isConnected(const char *signalName) const
     \instantiates QQuickKeysAttached
     \inqmlmodule QtQuick
     \ingroup qtquick-input
-    \brief Provides key handling to Items
+    \brief Provides key handling to Items.
 
     All visual primitives support key handling via the Keys
     attached property.  Keys can be handled via the onPressed
@@ -1507,7 +1507,7 @@ QQuickKeysAttached *QQuickKeysAttached::qmlAttachedProperties(QObject *obj)
     \inqmlmodule QtQuick
     \ingroup qtquick-positioners
     \ingroup qml-utility-elements
-    \brief Property used to mirror layout behavior
+    \brief Property used to mirror layout behavior.
 
     The LayoutMirroring attached property is used to horizontally mirror \l {anchor-layout}{Item anchors},
     \l{Item Positioners}{positioner} types (such as \l Row and \l Grid)
@@ -1816,10 +1816,10 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
 
     \section1 Custom Scene Graph Items
 
-    All visual QML items are rendered using the scene graph, a
-    low-level, high-performance rendering stack, closely tied to
-    OpenGL. It is possible for subclasses of QQuickItem to add their
-    own custom content into the scene graph by setting the
+    All visual QML items are rendered using the scene graph, the default
+    implementation of which is a low-level, high-performance rendering stack,
+    closely tied to OpenGL. It is possible for subclasses of QQuickItem to add
+    their own custom content into the scene graph by setting the
     QQuickItem::ItemHasContents flag and reimplementing the
     QQuickItem::updatePaintNode() function.
 
@@ -1924,7 +1924,7 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
     \inherits QtObject
     \inqmlmodule QtQuick
     \ingroup qtquick-visual
-    \brief A basic visual QML type
+    \brief A basic visual QML type.
 
     The Item type is the base type for all visual items in Qt Quick.
 
@@ -2355,6 +2355,9 @@ void QQuickItemPrivate::updateSubFocusItem(QQuickItem *scope, bool focus)
     \fn QQuickItem::QQuickItem(QQuickItem *parent)
 
     Constructs a QQuickItem with the given \a parent.
+
+    The \c parent will be used as both the \l {setParentItem()}{visual parent}
+    and the \l QObject parent.
 */
 QQuickItem::QQuickItem(QQuickItem* parent)
 : QObject(*(new QQuickItemPrivate), parent)
@@ -4406,6 +4409,8 @@ void QQuickItem::polish()
     item's coordinate system, to this item's coordinate system, and returns a \l point or \l rect
     matching the mapped coordinate.
 
+    \input item.qdocinc mapping
+
     If \a item is a \c null value, this maps the point or rect from the coordinate system of
     the root QML view.
 */
@@ -4494,6 +4499,8 @@ QTransform QQuickItem::itemTransform(QQuickItem *other, bool *ok) const
     item's coordinate system, to \a item's coordinate system, and returns a \l point or \l rect
     matching the mapped coordinate.
 
+    \input item.qdocinc mapping
+
     If \a item is a \c null value, this maps the point or rect to the coordinate system of the
     root QML view.
 */
@@ -4563,6 +4570,8 @@ void QQuickItem::mapToItem(QQmlV4Function *args) const
 
     Maps the point (\a x, \a y), which is in the global coordinate system, to the
     item's coordinate system, and returns a \l point  matching the mapped coordinate.
+
+    \input item.qdocinc mapping
 */
 /*!
     \internal
@@ -4598,6 +4607,8 @@ void QQuickItem::mapFromGlobal(QQmlV4Function *args) const
 
     Maps the point (\a x, \a y), which is in this item's coordinate system, to the
     global coordinate system, and returns a \l point  matching the mapped coordinate.
+
+    \input item.qdocinc mapping
 */
 /*!
     \internal
@@ -7687,6 +7698,8 @@ void QQuickItem::setContainmentMask(QObject *mask)
     point within \a item's coordinate system, and returns the mapped
     coordinate.
 
+    \input item.qdocinc mapping
+
     If \a item is 0, this maps \a point to the coordinate system of the
     scene.
 
@@ -7705,6 +7718,8 @@ QPointF QQuickItem::mapToItem(const QQuickItem *item, const QPointF &point) cons
     point within the scene's coordinate system, and returns the mapped
     coordinate.
 
+    \input item.qdocinc mapping
+
     \sa {Concepts - Visual Coordinates in Qt Quick}
 */
 QPointF QQuickItem::mapToScene(const QPointF &point) const
@@ -7717,6 +7732,8 @@ QPointF QQuickItem::mapToScene(const QPointF &point) const
     Maps the given \a point in this item's coordinate system to the equivalent
     point within global screen coordinate system, and returns the mapped
     coordinate.
+
+    \input item.qdocinc mapping
 
     For example, this may be helpful to add a popup to a Qt Quick component.
 
@@ -7739,6 +7756,8 @@ QPointF QQuickItem::mapToGlobal(const QPointF &point) const
     rectangular area within \a item's coordinate system, and returns the mapped
     rectangle value.
 
+    \input item.qdocinc mapping
+
     If \a item is 0, this maps \a rect to the coordinate system of the
     scene.
 
@@ -7758,6 +7777,8 @@ QRectF QQuickItem::mapRectToItem(const QQuickItem *item, const QRectF &rect) con
     rectangular area within the scene's coordinate system, and returns the mapped
     rectangle value.
 
+    \input item.qdocinc mapping
+
     \sa {Concepts - Visual Coordinates in Qt Quick}
 */
 QRectF QQuickItem::mapRectToScene(const QRectF &rect) const
@@ -7770,6 +7791,8 @@ QRectF QQuickItem::mapRectToScene(const QRectF &rect) const
     Maps the given \a point in \a item's coordinate system to the equivalent
     point within this item's coordinate system, and returns the mapped
     coordinate.
+
+    \input item.qdocinc mapping
 
     If \a item is 0, this maps \a point from the coordinate system of the
     scene.
@@ -7787,6 +7810,8 @@ QPointF QQuickItem::mapFromItem(const QQuickItem *item, const QPointF &point) co
     point within this item's coordinate system, and returns the mapped
     coordinate.
 
+    \input item.qdocinc mapping
+
     \sa {Concepts - Visual Coordinates in Qt Quick}
 */
 QPointF QQuickItem::mapFromScene(const QPointF &point) const
@@ -7799,6 +7824,8 @@ QPointF QQuickItem::mapFromScene(const QPointF &point) const
     Maps the given \a point in the global screen coordinate system to the
     equivalent point within this item's coordinate system, and returns the
     mapped coordinate.
+
+    \input item.qdocinc mapping
 
     For example, this may be helpful to add a popup to a Qt Quick component.
 
@@ -7821,6 +7848,8 @@ QPointF QQuickItem::mapFromGlobal(const QPointF &point) const
     rectangular area within this item's coordinate system, and returns the mapped
     rectangle value.
 
+    \input item.qdocinc mapping
+
     If \a item is 0, this maps \a rect from the coordinate system of the
     scene.
 
@@ -7838,6 +7867,8 @@ QRectF QQuickItem::mapRectFromItem(const QQuickItem *item, const QRectF &rect) c
     Maps the given \a rect in the scene's coordinate system to the equivalent
     rectangular area within this item's coordinate system, and returns the mapped
     rectangle value.
+
+    \input item.qdocinc mapping
 
     \sa {Concepts - Visual Coordinates in Qt Quick}
 */
